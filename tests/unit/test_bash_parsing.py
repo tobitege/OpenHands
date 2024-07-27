@@ -44,6 +44,22 @@ def test_multiple_commands(input_commands, expected_output):
     assert split_bash_commands(input_commands) == expected_output
 
 
+def test_multiline_commands():
+    input_commands = """
+for file in _modules/*.md; do
+    new_date=$(echo $file | sed -E 's/2024-(01|02|03|04)-/2024-/;s/2024-01/2024-08/;s/2024-02/2024-09/;s/2024-03/2024-10/;s/2024-04/2024-11/')
+    mv "$file" "$new_date"
+done
+"""
+    expected_output = [
+        'for file in _modules/*.md; do',
+        "new_date=$(echo $file | sed -E 's/2024-(01|02|03|04)-/2024-/;s/2024-01/2024-08/;s/2024-02/2024-09/;s/2024-03/2024-10/;s/2024-04/2024-11/')",
+        'mv "$file" "$new_date"',
+        'done',
+    ]
+    assert split_bash_commands(input_commands) == expected_output
+
+
 def test_heredoc():
     input_commands = """
 cat <<EOF

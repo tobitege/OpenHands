@@ -53,6 +53,7 @@ PyPDF2 = "*"
 python-pptx = "*"
 pylatexenc = "*"
 tornado = "*"
+gradio = "*"
 python-dotenv = "*"
 
 [tool.poetry.group.llama-index.dependencies]

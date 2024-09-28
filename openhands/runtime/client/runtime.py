@@ -1,6 +1,7 @@
 import os
 import tempfile
 import threading
+import time
 import uuid
 from zipfile import ZipFile
 
@@ -280,6 +281,7 @@ class EventStreamRuntime(Runtime):
                 volumes=volumes,
             )
             self.log_buffer = LogBuffer(container)
+            time.sleep(1)  # give log buffer time to initialize
             logger.info(f'Container started. Server url: {self.api_url}')
             return container
         except Exception as e:
@@ -297,6 +299,25 @@ class EventStreamRuntime(Runtime):
             self.log_buffer is not None
         ), 'Log buffer is expected to be initialized when container is started'
 
+        if not self.log_buffer.client_ready:
+            time.sleep(1)
+            attempts = 0
+            while not self.log_buffer.client_ready and attempts < 5:
+                attempts += 1
+                time.sleep(1)
+                logs = self.log_buffer.get_and_clear()
+                if logs:
+                    formatted_logs = '\n'.join([f'    |{log}' for log in logs])
+                    logger.info(
+                        '\n'
+                        + '-' * 35
+                        + 'Container logs:'
+                        + '-' * 35
+                        + f'\n{formatted_logs}'
+                        + '\n'
+                        + '-' * 80
+                    )
+
         logs = self.log_buffer.get_and_clear()
         if logs:
             formatted_logs = '\n'.join([f'    |{log}' for log in logs])
@@ -312,7 +333,7 @@ class EventStreamRuntime(Runtime):
 
     @tenacity.retry(
         stop=tenacity.stop_after_attempt(10),
-        wait=tenacity.wait_exponential(multiplier=2, min=1, max=20),
+        wait=tenacity.wait_exponential(multiplier=2, min=2, max=10),
         reraise=(ConnectionRefusedError,),
     )
     def _wait_until_alive(self):

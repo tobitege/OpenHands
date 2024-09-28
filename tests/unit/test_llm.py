@@ -3,10 +3,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from litellm.exceptions import (
     APIConnectionError,
-    ContentPolicyViolationError,
     InternalServerError,
-    OpenAIError,
     RateLimitError,
+    ServiceUnavailableError,
 )
 
 from openhands.core.config import LLMConfig
@@ -19,8 +18,8 @@ from openhands.llm.llm import LLM
 def mock_logger(monkeypatch):
     # suppress logging of completion data to file
     mock_logger = MagicMock()
-    monkeypatch.setattr('openhands.llm.llm.llm_prompt_logger', mock_logger)
-    monkeypatch.setattr('openhands.llm.llm.llm_response_logger', mock_logger)
+    monkeypatch.setattr('openhands.llm.debug_mixin.llm_prompt_logger', mock_logger)
+    monkeypatch.setattr('openhands.llm.debug_mixin.llm_response_logger', mock_logger)
     return mock_logger
 
 
@@ -139,16 +138,15 @@ def test_completion_with_mocked_logger(
             2,
         ),
         (
-            ContentPolicyViolationError,
-            {'model': 'test_model', 'llm_provider': 'test_provider'},
-            2,
-        ),
-        (
             InternalServerError,
             {'llm_provider': 'test_provider', 'model': 'test_model'},
             2,
         ),
-        (OpenAIError, {}, 2),
+        (
+            ServiceUnavailableError,
+            {'llm_provider': 'test_provider', 'model': 'test_model'},
+            2,
+        ),
         (RateLimitError, {'llm_provider': 'test_provider', 'model': 'test_model'}, 2),
     ],
 )
@@ -197,8 +195,8 @@ def test_completion_rate_limit_wait_time(mock_litellm_completion, default_config
         mock_sleep.assert_called_once()
         wait_time = mock_sleep.call_args[0][0]
         assert (
-            60 <= wait_time <= 240
-        ), f'Expected wait time between 60 and 240 seconds, but got {wait_time}'
+            default_config.retry_min_wait <= wait_time <= default_config.retry_max_wait
+        ), f'Expected wait time between {default_config.retry_min_wait} and {default_config.retry_max_wait} seconds, but got {wait_time}'
 
 
 @patch('openhands.llm.llm.litellm_completion')
@@ -298,3 +296,39 @@ def test_completion_with_litellm_mock(mock_litellm_completion, default_config):
     assert call_args['model'] == default_config.model
     assert call_args['messages'] == [{'role': 'user', 'content': 'Hello!'}]
     assert not call_args['stream']
+
+
+@patch('openhands.llm.llm.litellm_completion')
+def test_completion_with_two_positional_args(mock_litellm_completion, default_config):
+    mock_response = {
+        'choices': [{'message': {'content': 'Response to positional args.'}}]
+    }
+    mock_litellm_completion.return_value = mock_response
+
+    test_llm = LLM(config=default_config)
+    response = test_llm.completion(
+        'some-model-to-be-ignored',
+        [{'role': 'user', 'content': 'Hello from positional args!'}],
+        stream=False,
+    )
+
+    # Assertions
+    assert (
+        response['choices'][0]['message']['content'] == 'Response to positional args.'
+    )
+    mock_litellm_completion.assert_called_once()
+
+    # Check if the correct arguments were passed to litellm_completion
+    call_args, call_kwargs = mock_litellm_completion.call_args
+    assert (
+        call_kwargs['model'] == default_config.model
+    )  # Should use the model from config, not the first arg
+    assert call_kwargs['messages'] == [
+        {'role': 'user', 'content': 'Hello from positional args!'}
+    ]
+    assert not call_kwargs['stream']
+
+    # Ensure the first positional argument (model) was ignored
+    assert (
+        len(call_args) == 0
+    )  # No positional args should be passed to litellm_completion here

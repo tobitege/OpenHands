@@ -1,8 +1,8 @@
 import asyncio
-from typing import Callable
 
 import gradio as gr
 
+from ohgradio.oh_engine import OpenHandsEngine
 from openhands.core.logger import openhands_logger as logger
 
 
@@ -11,9 +11,8 @@ class OHInterface:
         self.backend_started = False
         self.chatbot_state = [('assistant', 'Welcome to OpenHands!')]
         self.chatbot = None
-        self.start_backend_fn: Callable | None = None
-        self.handle_user_input_fn: Callable | None = None
-        self.cancel_operation_fn: Callable | None = None
+        self.engine = OpenHandsEngine()  # Instantiate OpenHandsEngine
+        self.engine.chat_delegate = self.add_chat_message  # Set the chat delegate
         self.interface = None
         self.create_interface()
 
@@ -58,7 +57,7 @@ class OHInterface:
 
         async def _restart_backend():
             self.backend_started = False
-            await self.start_backend_fn(restart=True)
+            await self.engine.run(restart=True)
             return (
                 gr.update(visible=not self.backend_started),
                 gr.update(visible=self.backend_started),
@@ -325,7 +324,9 @@ class OHInterface:
             self.chatbot_state.append(('user', message))
         elif 'assistant' not in message:
             try:
-                await asyncio.wait_for(self.handle_user_input_fn(message), timeout=30.0)
+                await asyncio.wait_for(
+                    self.engine.handle_user_input(message), timeout=30.0
+                )
             except asyncio.TimeoutError:
                 self.chatbot_state.append(
                     ('system', 'Operation timed out. Please try again.')
@@ -343,8 +344,8 @@ class OHInterface:
         return gr.update(value=self.preprocess_messages(self.chatbot_state)), ''
 
     def _cancel_operation_wrapper(self):
-        if self.cancel_operation_fn:
-            result = self.cancel_operation_fn()
+        if self.engine:
+            result = self.engine.cancel_operation()  # Call engine method directly
             self.chatbot_state.append(('assistant', result))
         else:
             self.chatbot_state.append(('assistant', 'Backend not started!'))
@@ -366,17 +367,17 @@ class OHInterface:
         self.backend_started = False
 
         try:
-            await self.start_backend_fn()
+            await self.engine.run()
             self.chatbot_state.append(('assistant', 'Backend started successfully!'))
             self.backend_started = True
         except Exception as e:
             logger.error(f'Failed to start backend: {e}')
             self.chatbot_state.append(('assistant', 'Failed to start backend!'))
 
-    async def launch(self):
+    def launch(self):
         if not self.interface:
             self.create_interface()
-        await self.interface.launch(
+        self.interface.launch(
             server_port=7860,
             prevent_thread_lock=True,
             share=False,

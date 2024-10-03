@@ -8,7 +8,7 @@ from typing import Callable, Type
 import agenthub  # noqa F401 (we import this to get the agents registered)
 from openhands.controller import AgentController
 from openhands.controller.agent import Agent
-from openhands.core.config import AppConfig, load_app_config
+from openhands.core.config import AppConfig, LLMConfig, load_app_config
 from openhands.core.logger import openhands_logger as logger
 from openhands.core.schema import AgentState
 from openhands.events import EventSource, EventStream, EventStreamSubscriber
@@ -36,66 +36,174 @@ from openhands.storage import get_file_store
 
 class OpenHandsEngine:
     def __init__(self, sid: str | None = None, config: AppConfig | None = None):
+        """Initialize the OpenHandsEngine.
+        config.toml is source of truth for switching models!
+
+        Args:
+            sid (str | None): Session ID. If None, a unique ID will be generated.
+            config (AppConfig | None): Application configuration. If None, default config will be loaded.
+
+        Attributes:
+            sid (str): Unique session identifier.
+            _agent (Agent | None): The agent instance.
+            _agent_task (asyncio.Task | None): Internal task for running the agent.
+            _controller (AgentController | None): Controller for managing the agent.
+            _event_stream (EventStream | None): Stream for handling events.
+            _loop (AbstractEventLoop): The event loop for asynchronous operations.
+
+            is_running (bool): Flag indicating if the engine is running.
+            chat_delegate (Callable[[tuple[str, str]], None] | None): Function to handle chat messages.
+            cancel_event (asyncio.Event | None): Event for cancelling operations.
+            config (AppConfig): Appl. configuration, if None, default will be used.
+            llm_name (str | None): Name of the toml `llm` section as in [llm.name].
+            model (str | None): Name of the actual model, e.g. 'gpt-4o' or 'claude-3.5-sonnet'.
+        """
         self.sid = sid or f'oh_backend_{uuid.uuid4().hex[:8]}'
+        self._agent: Agent | None = None
         self._agent_task: asyncio.Task | None = None
+        self._controller: AgentController | None = None
+        self._event_stream: EventStream | None = None
+        self._loop: AbstractEventLoop = asyncio.get_event_loop()
+
         self.is_running: bool = False
-        self.controller: AgentController | None = None
         self.chat_delegate: Callable[[tuple[str, str]], None] | None = None
         self.cancel_event: asyncio.Event | None = None
-        self.event_stream: EventStream | None = None
+        self.llm_name: str | None = None
+        self.model: str | None = None
         self.config = config or load_app_config()
-        self.loop: AbstractEventLoop = asyncio.get_event_loop()
 
-    async def run(self, restart: bool = False):
+    def switch_running_model(self, new_llm_name: str) -> bool:
+        """Switch the currently running model to a new one.
+
+        This method attempts to change the language model (LLM) used by the agent
+        to the one specified by `new_llm_name`. It performs several checks and validations
+        before making the switch.
+
+        Args:
+            new_llm_name (str): The name of the new LLM to switch to.
+
+        Returns:
+            bool: True if the switch was successful, False otherwise.
+
+        Raises:
+            Exception: If there's an error while switching to the new model.
+
+        Note:
+            - This method requires an active agent (_agent) to be running.
+            - It will not switch if the new model name is the same as the current one.
+            - The method logs various debug and error messages during the process.
+        """
+        if not self._agent:
+            logger.warning('No agent running, cannot switch model.')
+            return False
+
+        if not new_llm_name:
+            logger.warning('No new LLM name provided.')
+            return False
+
+        if new_llm_name == self.llm_name:
+            logger.info(f"LLM '{new_llm_name}' is already active.")
+            return False
+
+        new_llm_config = self.get_llm_config(new_llm_name)
+        if new_llm_config and hasattr(new_llm_config, 'model'):
+            try:
+                self._agent.llm = LLM(config=new_llm_config)
+                self.llm_name = new_llm_name
+                self.model = new_llm_config.model
+                logger.debug('>>> --------------------------------------------------')
+                logger.debug(f'>>> Backend model switched to: `{self.model}`')
+                logger.debug('>>> --------------------------------------------------')
+                return True
+            except Exception as e:
+                logger.error(
+                    f"'>>> Error switching to model '{new_llm_name}': {str(e)}"
+                )
+                return False
+        else:
+            logger.debug(
+                f'>>> Backend model not switched, check config for `{new_llm_name}`'
+            )
+            return False
+
+    async def run(self, restart: bool = False, llm_override: str | None = None):
+        """Start or restart the OpenHands engine.
+
+        This method initializes and starts the OpenHands engine. It sets up the agent,
+        event stream, and runtime, and begins the agent loop.
+
+        Args:
+            restart (bool): If True, the engine will be restarted by closing the existing instance.
+            llm_override (str | None): Optional new LLM name to switch to instead of the default.
+
+        Note:
+            - If `restart` is True, the existing engine instance will be closed first.
+            - If `llm_override` is provided, the engine will switch to the new LLM.
+        """
         if self.is_running:
-            if not restart:
+            if restart:
+                await self.close()
+            elif not llm_override:
+                logger.debug('Engine already running, ignoring `run` call.')
                 return
-            await self.close()
 
         self.is_running = True
 
         agent_cls: Type[Agent] = Agent.get_cls(self.config.default_agent)
         agent_config = self.config.get_agent_config(self.config.default_agent)
         llm_config = self.config.get_llm_config_from_agent(self.config.default_agent)
-        self.agent = agent_cls(
+
+        if llm_override:
+            model_llm_config = self.get_llm_config(llm_override)
+            if model_llm_config:
+                self.llm_name = llm_override
+                self.model = model_llm_config.model
+                llm_config = model_llm_config
+                logger.debug(f'>>> Backend using model `{llm_override}`')
+            else:
+                logger.warning(
+                    f'>>> Model `{llm_override}` not found, using default model'
+                )
+
+        self._agent = agent_cls(
             llm=LLM(config=llm_config),
             config=agent_config,
         )
 
         file_store = get_file_store(self.config.file_store, self.config.file_store_path)
-        self.event_stream = EventStream(self.sid, file_store)
+        self._event_stream = EventStream(self.sid, file_store)
 
         runtime_cls = get_runtime_cls(self.config.runtime)
         self.runtime: Runtime = runtime_cls(
             config=self.config,
-            event_stream=self.event_stream,
+            event_stream=self._event_stream,
             sid=self.sid,
             plugins=agent_cls.sandbox_plugins,
         )
 
-        self.controller = AgentController(
-            agent=self.agent,
+        self._controller = AgentController(
+            agent=self._agent,
             max_iterations=self.config.max_iterations,
             max_budget_per_task=self.config.max_budget_per_task,
             agent_to_llm_config=self.config.get_agent_to_llm_config_map(),
-            event_stream=self.event_stream,
+            event_stream=self._event_stream,
             sid=self.sid,
             confirmation_mode=False,
             headless_mode=False,
         )
 
-        self.event_stream.subscribe(EventStreamSubscriber.MAIN, self.on_event)
+        self._event_stream.subscribe(EventStreamSubscriber.MAIN, self.on_event)
 
         logger.info('OpenHands started!')
 
-        self._agent_task = self.loop.create_task(self._run_agent_loop())
+        self._agent_task = self._loop.create_task(self._run_agent_loop())
 
     async def _run_agent_loop(self):
         while self.is_running:
             try:
-                await self.controller._step()
+                await self._controller._step()
             except asyncio.CancelledError:
-                logger.info('AgentController task was cancelled, closing...')
+                logger.debug('AgentController task was cancelled, closing...')
                 break
             except Exception as e:
                 logger.error(f'Error in agent loop: {e}')
@@ -173,19 +281,19 @@ class OpenHandsEngine:
 
     async def on_event(self, event: Event):
         logger.debug(f'>>> Event: {event}')
-        if not self.event_stream:
+        if not self._event_stream:
             return
 
         output = await self.display_event(event)
-        logger.debug(f'>>> Output: {output}')
         if output:
+            logger.debug(f'>>> Output: {output}')
             chat_message = (
                 'assistant' if event.source != EventSource.USER else 'user',
                 output,
             )
             if self.chat_delegate:
                 await self.chat_delegate(chat_message)
-                logger.debug('>>> sent message to UI')
+                logger.debug('>>> Message sent to UI')
             else:
                 logger.error('>>> No message delegate assigned!')
 
@@ -203,28 +311,27 @@ class OpenHandsEngine:
                 await self._check_for_next_task('')
 
     async def _check_for_next_task(self, message: str):
-        if not message or not self.event_stream:
+        if not message or not self._event_stream:
             return
         if message == 'exit':
-            self.event_stream.add_event(
+            self._event_stream.add_event(
                 ChangeAgentStateAction(AgentState.STOPPED), EventSource.USER
             )
             return
         action = MessageAction(content=message)
-        self.event_stream.add_event(action, EventSource.USER)
+        self._event_stream.add_event(action, EventSource.USER)
         logger.debug(f'Added MessageAction to event stream:\n{action}')
 
     async def handle_user_input(self, message: str):
-        if not self.event_stream or not self.controller:
+        if not self._event_stream or not self._controller:
             return
         await self._check_for_next_task(message)
-        # Ensure the agent is in the RUNNING state
-        if self.controller.state.agent_state != AgentState.RUNNING:
-            await self.controller.set_agent_state_to(AgentState.RUNNING)
+        if self._controller.state.agent_state != AgentState.RUNNING:
+            await self._controller.set_agent_state_to(AgentState.RUNNING)
 
     def cancel_operation(self):
-        if self.event_stream:
-            self.event_stream.add_event(
+        if self._event_stream:
+            self._event_stream.add_event(
                 ChangeAgentStateAction(AgentState.STOPPED), EventSource.USER
             )
             return 'Operation cancelled.'
@@ -246,9 +353,44 @@ class OpenHandsEngine:
             finally:
                 self._agent_task = None
 
-        if hasattr(self, 'controller') and isinstance(self.controller, AgentController):
-            await self.controller.close()
+        if hasattr(self, '_controller') and isinstance(
+            self._controller, AgentController
+        ):
+            await self._controller.close()
         if hasattr(self, 'runtime') and isinstance(self.runtime, Runtime):
             self.runtime.close()
 
         logger.info('OpenHandsEngine closed successfully')
+
+    def get_model_names(self):
+        models = []
+        default_model = None
+
+        if not self.config.llms:
+            logger.error('Error: no model specifications found in config.toml!')
+            return None, None
+
+        if 'llm' in self.config.llms and self.config.llms['llm'].model is not None:
+            default_model = '(Default)'
+
+        for key in self.config.llms:
+            if key != 'llm':  # Exclude the default 'llm' key
+                models.append(key)
+                models.sort()
+
+        if default_model:
+            models = [default_model] + models
+
+        return models, default_model
+
+    def get_llm_config(self, model) -> LLMConfig | None:
+        if not model:
+            logger.error('>>> No model specified, using default')
+            return None
+
+        llm_config = self.config.get_llm_config(f'{model}')
+        if llm_config:
+            return llm_config
+
+        logger.error(f'>>> Model `{model}` not found')
+        return None

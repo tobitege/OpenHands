@@ -8,12 +8,12 @@ from openhands.core.logger import openhands_logger as logger
 
 class OHInterface:
     def __init__(self):
-        self.backend_started = False
         self.chatbot_state = [('assistant', 'Welcome to OpenHands!')]
         self.chatbot = None
         self.engine = OpenHandsEngine()  # Instantiate OpenHandsEngine
         self.engine.chat_delegate = self.add_chat_message  # Set the chat delegate
         self.interface = None
+        self.model = None
         self.create_interface()
 
     def create_interface(self):
@@ -22,8 +22,21 @@ class OHInterface:
         self.interface = self._create_interface()
 
     def _create_interface(self):
+        models, default_model = self.engine.get_model_names()
+        models_available = models is not None and len(models) > 0
+
         async def _start_backend_wrapper():
-            if self.backend_started:
+            if not models_available:
+                self.chatbot_state.append(
+                    ('system', 'No models available. Cannot start backend.')
+                )
+                return (
+                    gr.update(visible=True),
+                    gr.update(visible=False),
+                    gr.update(),
+                    gr.update(value=self.chatbot_state),
+                )
+            if self.engine.is_running:
                 return (
                     gr.update(visible=False),
                     gr.update(visible=True),
@@ -32,8 +45,8 @@ class OHInterface:
                 )
             await self._start_backend()
             return (
-                gr.update(visible=not self.backend_started),
-                gr.update(visible=self.backend_started),
+                gr.update(visible=not self.engine.is_running),
+                gr.update(visible=self.engine.is_running),
                 '',
                 gr.update(value=self.chatbot_state),
                 gr.update(visible=False),
@@ -56,11 +69,10 @@ class OHInterface:
             return gr.update(visible=True)
 
         async def _restart_backend():
-            self.backend_started = False
-            await self.engine.run(restart=True)
+            await self.engine.run(restart=True, llm_override=self.model)
             return (
-                gr.update(visible=not self.backend_started),
-                gr.update(visible=self.backend_started),
+                gr.update(visible=not self.engine.is_running),
+                gr.update(visible=self.engine.is_running),
                 '',
                 gr.update(value=self.chatbot_state),
                 gr.update(visible=False),
@@ -68,11 +80,13 @@ class OHInterface:
 
         async def _chat_interface(message, history):
             history = history or []
-            if not self.backend_started:
+            if not self.engine.is_running:
                 self.chatbot_state.append(('system', 'Backend not started!'))
                 return '', history, gr.update(value='')
-            if self.backend_started:
-                await asyncio.wait_for(self.handle_user_input_fn(message), timeout=30.0)
+            if self.engine.is_running:
+                await asyncio.wait_for(
+                    self.engine.handle_user_input(message), timeout=30.0
+                )
             return '', history, gr.update(value='')
 
         async def update_chatbot():
@@ -144,7 +158,7 @@ class OHInterface:
             input_border_color_dark=custom_colors['neutral_600'],
             # Common properties
             layout_gap='*spacing_md',
-            input_padding='*spacing_sm',
+            input_padding='*spacing_md',
             input_radius='*radius_sm',
             block_background_fill='*background_fill_primary',
             block_border_width='1px',
@@ -181,9 +195,27 @@ class OHInterface:
                 with gr.Column(scale=1, elem_classes='sidebar'):
                     gr.Markdown('Options')
                     with gr.Group():
-                        start_btn = gr.Button('Start Backend', elem_id='start_button')
+                        model_dropdown = gr.Dropdown(
+                            label='Model',
+                            choices=models if models_available else None,
+                            value=default_model if models_available else None,
+                            visible=models_available,
+                            elem_id='model_dropdown',
+                        )
+                        if not models_available:
+                            gr.Markdown(
+                                'No models available. Please check your config.toml file.'
+                            )
+                        start_btn = gr.Button(
+                            'Start Backend',
+                            elem_id='start_button',
+                            interactive=models_available,
+                        )
                         restart_btn = gr.Button(
-                            'Restart Backend', elem_id='restart_button', visible=False
+                            'Restart Backend',
+                            elem_id='restart_button',
+                            visible=False,
+                            interactive=models_available,
                         )
                     with gr.Group():
                         toggle_dark = gr.Button(value='Toggle Dark')
@@ -200,11 +232,10 @@ class OHInterface:
                     )
 
                     with gr.Row(visible=False) as confirm_dialog:
-                        gr.Markdown('Are you sure you want to restart the backend?')
-                        with gr.Row():
-                            with gr.Group():
-                                confirm_yes = gr.Button('Yes')
-                                confirm_no = gr.Button('No')
+                        with gr.Group():
+                            gr.Markdown('Are you sure you want to restart the backend?')
+                            confirm_yes = gr.Button('Yes')
+                            confirm_no = gr.Button('No')
 
                     with gr.Row():
                         with gr.Group():
@@ -212,7 +243,6 @@ class OHInterface:
                                 label='Your prompt',
                                 placeholder='',
                                 show_copy_button=False,
-                                # lines=3
                             )
                             send_btn = gr.Button('Send', variant='primary')
 
@@ -222,9 +252,22 @@ class OHInterface:
 
                     self.chatbot = chatbot
 
+            model_dropdown.change(
+                fn=self.update_model,
+                inputs=[model_dropdown],
+                outputs=[],
+                js="""
+                (value) => {
+                    document.cookie = 'oh_gradio_selected_model=' + encodeURIComponent(value) + '; path=/; SameSite=None; Secure';
+                    return value;
+                }
+                """,
+            )
+
             msg.submit(
                 self._submit_wrapper, msg, [msg, chatbot], queue=False, show_api=False
             )
+
             send_btn.click(
                 self._submit_wrapper, msg, [msg, chatbot], queue=False, show_api=False
             )
@@ -295,16 +338,38 @@ class OHInterface:
             _interface.load(
                 update_chatbot,
                 inputs=None,
-                outputs=self.chatbot,
+                outputs=chatbot,
+                show_api=False,
                 js=f"""
                 () => {{
                     document.querySelector('footer').style.display = 'none';
                     const style = document.createElement('style');
                     style.textContent = `{custom_css}`;
                     document.head.appendChild(style);
+
+                    // Read the cookie and set the model_dropdown value
+                    var selectedModel = document.cookie
+                        .split('; ')
+                        .find(row => row.startsWith('oh_gradio_selected_model='))
+                        ?.split('=')[1];
+                    if (selectedModel) {{
+                        console.log('cookie selectedModel', selectedModel);
+                        selectedModel = decodeURIComponent(selectedModel);
+                        console.log('decoded selectedModel', selectedModel);
+                        var modelDropdown = document.getElementById('model_dropdown');
+                        if (modelDropdown) {{
+                            console.log('modelDropdown', modelDropdown);
+                            var selectElem = modelDropdown.querySelector('input[role="listbox"]');
+                            if (selectElem) {{
+                                console.log('selectElem', selectElem);
+                                selectElem.value = selectedModel;
+                                // Trigger change event to update backend
+                                selectElem.dispatchEvent(new Event('change'));
+                            }}
+                        }}
+                    }}
                 }}
                 """,
-                show_api=False,
             )
 
         return _interface
@@ -315,7 +380,7 @@ class OHInterface:
         return gr.update(value=self.preprocess_messages(self.chatbot_state))
 
     async def _submit_wrapper(self, message):
-        if not self.backend_started or not self.chatbot:
+        if not self.engine.is_running or not self.chatbot:
             gr.Warning(
                 visible=True,
                 duration=3000,
@@ -362,14 +427,26 @@ class OHInterface:
             previous_role = role
         return processed_messages
 
+    def update_model(self, model):
+        if not model:
+            logger.error('No model provided to update_model')
+            return
+        self.model = model
+        self.engine.switch_running_model(self.model)
+
     async def _start_backend(self):
-        self.chatbot_state.append(('assistant', 'Starting backend, please wait...'))
-        self.backend_started = False
+        self.chatbot_state.append(
+            ('assistant', f'Starting backend with model {self.model}, please wait...')
+        )
 
         try:
-            await self.engine.run()
-            self.chatbot_state.append(('assistant', 'Backend started successfully!'))
-            self.backend_started = True
+            await self.engine.run(llm_override=self.model)
+            self.chatbot_state.append(
+                (
+                    'assistant',
+                    f'Backend started successfully with model `{self.model}`!',
+                )
+            )
         except Exception as e:
             logger.error(f'Failed to start backend: {e}')
             self.chatbot_state.append(('assistant', 'Failed to start backend!'))

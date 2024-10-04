@@ -417,7 +417,7 @@ print("File created successfully.")
 OBSERVATION:
 File created successfully.
 [Jupyter current working directory: /workspace]
-[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.11/bin/python]
+[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.12/bin/python]
 
 ----------
 
@@ -432,7 +432,7 @@ with open('/workspace/test.txt', 'r') as f:
 OBSERVATION:
 hello world
 [Jupyter current working directory: /workspace]
-[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.11/bin/python]
+[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.12/bin/python]
 
 
 ENVIRONMENT REMINDER: You have 17 turns left to complete the task. When finished reply with <finish></finish>.

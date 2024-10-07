@@ -177,7 +177,7 @@ evaluation/toolqa/data
 # frontend
 
 # dependencies
-**/node_modules
+frontend/node_modules
 frontend/.pnp
 frontend/bun.lockb
 frontend/yarn.lock

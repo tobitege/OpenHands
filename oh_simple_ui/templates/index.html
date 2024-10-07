@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenHands: Code Less, Make More</title>
+    <link href="/static/css/output.css" rel="stylesheet">
+</head>
+<body class="bg-base-200">
+    <div class="flex flex-col h-screen">
+        <div class="text-xl font-bold p-4">OpenHands: Code Less, Make More</div>
+        <div class="flex flex-1 h-full">
+            <!-- Sidebar -->
+            <div class="w-64 bg-base-100 p-4 border-r border-base-300 h-full flex-shrink-0 flex flex-col">
+                <div>
+                    <h3 class="text-xl font-bold mb-4">Options</h3>
+                    <div class="mb-4">
+                        <label class="label">
+                            <span class="label-text">Model</span>
+                        </label>
+                        <select id="model-dropdown" class="select select-bordered w-full">
+                            <!-- Model options will be dynamically populated -->
+                        </select>
+                    </div>
+                    <div class="flex items-center mb-4">
+                        <button id="start-button" class="mr-4 btn btn-primary flex-grow">Start Backend</button>
+                        <button id="restart-button" class="mr-4 btn btn-secondary flex-grow hidden" style="display: none;">Restart Backend</button>
+                        <div class="ml-4 mt-2">
+                            <div id="backend-status-container">
+                                <div id="backend-status" class="w-4 h-4 rounded-full"></div>
+                                <span id="loading-indicator" class="loading loading-dots loading-sm" style="display: none;"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex flex-col mb-2 border-t border-base-300 pt-8">
+                    <label for="clear-button" class="label">Chat</label>
+                    <div class="flex">
+                        <button id="clear-button" class="btn btn-secondary mr-2">Clear</button>
+                        <button id="cancel-button" class="btn">Cancel</button>
+                    </div>
+                </div>
+                <!-- Theming -->
+                <div class="mb-4 mt-auto">
+                    <label for="theme-selector" class="label">Theme</label>
+                    <select id="theme-selector" class="select select-bordered w-full">
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                        <option value="acid">Acid</option>
+                        <option value="aqua">Aqua</option>
+                        <option value="autumn">Autumn</option>
+                        <option value="black">Black</option>
+                        <option value="bumblebee">Bumblebee</option>
+                        <option value="business">Business</option>
+                        <option value="cmyk">CMYK</option>
+                        <option value="corporate">Corporate</option>
+                        <option value="cupcake">Cupcake</option>
+                        <option value="cyberpunk">Cyberpunk</option>
+                        <option value="dracula">Dracula</option>
+                        <option value="emerald">Emerald</option>
+                        <option value="fantasy">Fantasy</option>
+                        <option value="forest">Forest</option>
+                        <option value="garden">Garden</option>
+                        <option value="halloween">Halloween</option>
+                        <option value="lemonade">Lemonade</option>
+                        <option value="lofi">Lofi</option>
+                        <option value="luxury">Luxury</option>
+                        <option value="pastel">Pastel</option>
+                        <option value="retro">Retro</option>
+                        <option value="synthwave">Synthwave</option>
+                        <option value="valentine">Valentine</option>
+                        <option value="wireframe">Wireframe</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="flex-1 flex flex-col h-full" style="padding-left: 1rem; padding-right: 1rem; padding-top: 0;">
+                <!-- Top Area: Chat Container -->
+                <div class="flex-grow flex flex-col overflow-hidden" pb-4>
+                    <div class="label">
+                        <span class="label-text">Conversation</span>
+                    </div>
+                    <div id="chat-container" class="bg-base-100 bordered rounded-lg shadow-md p-4 flex-grow overflow-y-auto flex flex-col space-y-2">
+                    </div>
+                </div>
+
+                <!-- Bottom Area: Remaining Components -->
+                <div class="sticky bottom-0 mb-4 mt-2 flex-shrink-0">
+                    <!-- Confirmation Dialog -->
+                    <div id="confirm-dialog" class="modal">
+                        <div class="modal-box">
+                            <h3 class="font-bold text-lg">Are you sure you want to restart the backend?</h3>
+                            <div class="modal-action">
+                                <button id="confirm-yes" class="btn btn-primary">Yes</button>
+                                <button id="confirm-no" class="btn">No</button>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Chat Form -->
+                    <form id="chat-form" class="w-full">
+                        <div class="flex items-center w-full space-x-2">
+                            <button type="button" id="image-upload-button" class="btn btn-square" aria-label="Upload image">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 32 32" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                            </button>
+                            <textarea id="chat-input" placeholder="Type your message here..." rows="1"
+                                class="textarea textarea-bordered textarea-sm font-mono flex-grow min-w-0"></textarea>
+                            <button type="submit" id="send-button" class="btn btn-square" aria-label="Send message">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h14m0 0v-8" />
+                                </svg>
+                            </button>
+                        </div>
+                    </form>
+                    <!-- Status Message Area -->
+                    <div class="flex flex-col w-full">
+                        <label for="status-log" class="label">Status Log:</label>
+                        <textarea id="status-log" class="textarea textarea-bordered w-full font-mono" rows="4" readonly
+                            style="line-height: 1.1em;"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

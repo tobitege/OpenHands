@@ -6,8 +6,8 @@ from asyncio import AbstractEventLoop
 from typing import Callable, Type
 
 import agenthub  # noqa F401 (we import this to get the agents registered)
-from openhands.controller import AgentController
 from openhands.controller.agent import Agent
+from openhands.controller.agent_controller import AgentController
 from openhands.core.config import AppConfig, LLMConfig, load_app_config
 from openhands.core.logger import openhands_logger as logger
 from openhands.core.schema import AgentState
@@ -27,6 +27,7 @@ from openhands.events.observation import (
     AgentStateChangedObservation,
     CmdOutputObservation,
     IPythonRunCellObservation,
+    NullObservation,
 )
 from openhands.llm.llm import LLM
 from openhands.runtime import get_runtime_cls
@@ -103,7 +104,7 @@ class OpenHandsEngine:
 
         if new_llm_name == self.llm_name:
             logger.info(f"LLM '{new_llm_name}' is already active.")
-            return False
+            return True
 
         new_llm_config = self.get_llm_config(new_llm_name)
         if new_llm_config and hasattr(new_llm_config, 'model'):
@@ -179,6 +180,8 @@ class OpenHandsEngine:
             event_stream=self._event_stream,
             sid=self.sid,
             plugins=agent_cls.sandbox_plugins,
+            # TODO: add status message callback
+            # status_message_callback = self.add_status_message,
         )
 
         self._controller = AgentController(
@@ -210,6 +213,9 @@ class OpenHandsEngine:
                 traceback.print_exc()
                 break
             await asyncio.sleep(0.1)  # Short sleep to prevent CPU hogging
+
+    async def check_if_running(self):
+        return self.is_running
 
     def _remove_terminal_codes(self, text: str) -> str:
         """Remove terminal special codes from the given text."""
@@ -271,7 +277,7 @@ class OpenHandsEngine:
         elif hasattr(event, 'content') and event.content.strip():
             if isinstance(event, MessageAction):
                 if event.source == EventSource.USER:
-                    msg = f'👤 {event.content}'
+                    msg = ''  # f'👤 {event.content}'
                 else:
                     msg = f'🤖 {event.content}'
             else:
@@ -281,7 +287,7 @@ class OpenHandsEngine:
 
     async def on_event(self, event: Event):
         logger.debug(f'>>> Event: {event}')
-        if not self._event_stream:
+        if not self._event_stream or isinstance(event, NullObservation):
             return
 
         output = await self.display_event(event)
@@ -292,7 +298,7 @@ class OpenHandsEngine:
                 output,
             )
             if self.chat_delegate:
-                await self.chat_delegate(chat_message)
+                self.chat_delegate('assistant', chat_message)
                 logger.debug('>>> Message sent to UI')
             else:
                 logger.error('>>> No message delegate assigned!')
@@ -300,7 +306,7 @@ class OpenHandsEngine:
         if isinstance(event, AgentStateChangedObservation):
             if event.agent_state == AgentState.ERROR:
                 if self.chat_delegate:
-                    await self.chat_delegate(
+                    self.chat_delegate(
                         ('assistant', 'An error occurred. Please try again.')
                     )
             elif event.agent_state in [
@@ -336,6 +342,11 @@ class OpenHandsEngine:
             )
             return 'Operation cancelled.'
         return 'Backend not started!'
+
+    def clear_chat_state(self):
+        if self._event_stream:
+            self._event_stream.clear()
+            return 'Chat history cleared.'
 
     async def close(self):
         """Clean up resources and close the sandbox container."""

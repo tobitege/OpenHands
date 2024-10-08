@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     const savedTheme = getCookie('oh_theme') || 'dark';
     const chatForm = document.getElementById('chat-form');
-    const userInput = document.getElementById('user-input');
+    const chatInput = document.getElementById('chat-input');
     const chatContainer = document.getElementById('chat-container');
     const modelDropdown = document.getElementById('model-dropdown');
     const startBtn = document.getElementById('start-button');
@@ -10,14 +10,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmNoBtn = document.getElementById('confirm-no');
     const backendStatus = document.getElementById('backend-status');
     const loadingIndicator = document.getElementById('loading-indicator');
+    const themeSelector = document.getElementById('theme-selector');
     const cancelButton = document.getElementById('cancel-button');
     const sendButton = document.getElementById('send-button');
     const clearButton = document.getElementById('clear-button');
     const confirmDialog = document.getElementById('confirm-dialog');
     const imageUploadButton = document.getElementById('image-upload-button');
 
-    function updateBackendStatus(isRunning) {
-        if (isRunning) {
+    const websocket = new WebSocket(`ws://${window.location.host}/ws`);
+
+    let backendRunning = null;
+    let backendLoading = false;
+
+    function updateBackendStatus() {
+        if (backendRunning) {
             backendStatus.classList.remove('bg-red-500');
             backendStatus.classList.add('bg-green-500');
             backendStatus.title = 'Backend is running';
@@ -26,40 +32,51 @@ document.addEventListener('DOMContentLoaded', () => {
             backendStatus.classList.add('bg-red-500');
             backendStatus.title = 'Backend is not running';
         }
-        console.debug('updateBackendStatus done', isRunning);
+        startBtn.style.display = backendRunning ? 'none' : 'inline-block';
+        restartBtn.style.display = backendRunning ? 'inline-block' : 'none';
+        setLoadingIndicator(backendLoading);
     }
 
-    async function checkAndUpdateBackendStatus() {
-        try {
-            const response = await fetch('/backend_status');
-            const data = await response.json();
-            updateBackendStatus(data.is_running);
-        } catch (error) {
-            console.error('Error fetching backend status:', error);
-            updateBackendStatus(false);
-        }
+    function setLoadingIndicator(isEnabled) {
+        backendLoading = isEnabled;
+        loadingIndicator.style.display = isEnabled ? 'inline-block' : 'none';
+        backendStatus.style.display = isEnabled ? 'none' : 'inline-block';
+        chatInput.disabled = isEnabled;
+        clearButton.disabled = isEnabled;
+        cancelButton.disabled = isEnabled;
+        sendButton.disabled = isEnabled;
     }
 
-    function showLoadingIndicator() {
-        backendStatus.style.display = 'none';
-        loadingIndicator.style.display = 'inline-block';
-        userInput.disabled = true;
-        clearButton.disabled = true;
-        cancelButton.disabled = true;
-        sendButton.disabled = true;
+    function checkAndUpdateBackendStatus() {
+        fetch('/backend_status')
+            .then(response => response.json())
+            .then(data => {
+                const newStatus = data.is_running;
+                console.debug('checkAndUpdateBackendStatus', newStatus);
+                if (newStatus !== backendRunning) {
+                    backendRunning = newStatus;
+                    updateBackendStatus();
+                }
+            })
+            .catch(error => console.error('Error:', error));
     }
 
-    function hideLoadingIndicator() {
-        loadingIndicator.style.display = 'none';
-        backendStatus.style.display = 'block';
-        userInput.disabled = false;
-        clearButton.disabled = false;
-        cancelButton.disabled = false;
-        sendButton.disabled = false;
-    }
+    const startPeriodicCheck = () => {
+        const checkInterval = 20000; // 20 seconds
 
-    // Initial status check
+        const periodicCheck = () => {
+            const loadingIndicator = document.querySelector(".loading-indicator");
+            if (!loadingIndicator || !loadingIndicator.classList.contains("visible")) {
+                checkAndUpdateBackendStatus();
+            }
+        };
+
+        setInterval(periodicCheck, checkInterval);
+    };
+
+    // Initialize status display and start status checks
     checkAndUpdateBackendStatus();
+    startPeriodicCheck();
 
     // Fetch and populate model dropdown
     fetch('/models')
@@ -86,8 +103,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         })
         .catch(error => console.error('Error fetching models:', error));
-
-    const websocket = new WebSocket(`ws://${window.location.host}/ws`);
 
     websocket.onmessage = (event) => {
         const messageData = JSON.parse(event.data);
@@ -149,12 +164,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    chatForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const message = userInput.value.trim();
-        if (message) {
+    async function handleChatSubmit() {
+        const message = chatInput.value.trim();
+        if (message && backendRunning) {
             addMessage('user', message);
-            userInput.value = '';
+            chatInput.value = '';
+            setLoadingIndicator(true);
             try {
                 const response = await fetch('/chat/', {
                     method: 'POST',
@@ -163,12 +178,38 @@ document.addEventListener('DOMContentLoaded', () => {
                     },
                     body: JSON.stringify({ message }),
                 });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
                 addMessage('assistant', data.response);
             } catch (error) {
                 console.error('Error:', error);
                 addMessage('assistant', 'Sorry, an error occurred. Please try again.');
+            } finally {
+                setLoadingIndicator(false);
             }
+        }
+    }
+
+    chatForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        handleChatSubmit();
+    });
+
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (backendRunning) {
+                handleChatSubmit();
+            }
+        }
+    });
+
+    sendButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (backendRunning) {
+            handleChatSubmit();
         }
     });
 
@@ -191,7 +232,6 @@ document.addEventListener('DOMContentLoaded', () => {
         fileInput.click();
     });
 
-    const themeSelector = document.getElementById('theme-selector');
     themeSelector.addEventListener('change', () => {
         const selectedTheme = themeSelector.value.toLowerCase();
         document.documentElement.setAttribute('data-theme', selectedTheme);
@@ -205,26 +245,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     startBtn.addEventListener('click', async () => {
         startBtn.disabled = true;
-        showLoadingIndicator();
+        setLoadingIndicator(true);
 
         try {
             const response = await fetch('/start_backend/', { method: 'POST' });
             const data = await response.json();
             if (data.success) {
                 addStatusMessage('Backend started successfully');
-                startBtn.style.display = 'none';
-                restartBtn.style.display = 'inline-block';
             } else {
                 addStatusMessage('Failed to start backend');
-                startBtn.disabled = false;
             }
         } catch (error) {
             console.error('Error starting backend:', error);
             addStatusMessage('Error occurred while starting backend');
-            startBtn.disabled = false;
         } finally {
-            hideLoadingIndicator();
             await checkAndUpdateBackendStatus();
+            setLoadingIndicator(false);
         }
     });
 
@@ -237,6 +273,7 @@ document.addEventListener('DOMContentLoaded', () => {
         restartBtn.disabled = true;
         restartBtn.textContent = 'Restarting...';
         restartBtn.style.opacity = '0.5';
+        setLoadingIndicator(true);
 
         try {
             const response = await fetch('/restart_backend/', { method: 'POST' });
@@ -254,6 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
             restartBtn.textContent = 'Restart Backend';
             restartBtn.style.opacity = '1';
             await checkAndUpdateBackendStatus();
+            setLoadingIndicator(false);
         }
     });
 
@@ -287,7 +325,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let inCodeBlock = false;
 
         for (const line of lines) {
-            if (line.includes('❯ Command:') || line.includes('❯ Code:') || line.startsWith('IPython ❯')) {
+            if (line.includes('Bash ❯') || line.includes('❯ Command:') || line.includes('❯ Code:') || line.startsWith('IPython ❯')) {
                 if (currentSection.length > 0) {
                     appendSection(bubbleDiv, currentSection, inCodeBlock);
                     currentSection = [];
@@ -311,10 +349,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function appendSection(bubbleDiv, section, isCode) {
+        // Create a div with the 'prose' class for markdown-like styling
+        const proseDiv = document.createElement('div');
+        proseDiv.className = 'prose';
+
         if (isCode) {
             const firstLine = document.createElement('p');
             firstLine.textContent = section[0];
-            bubbleDiv.appendChild(firstLine);
+            proseDiv.appendChild(firstLine);
 
             if (section.length > 1) {
                 const mockupCode = document.createElement('div');
@@ -329,15 +371,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     mockupCode.appendChild(pre);
                 });
 
-                bubbleDiv.appendChild(mockupCode);
+                proseDiv.appendChild(mockupCode);
             }
         } else {
-            const p = document.createElement('p');
-            p.textContent = section.join('\n');
-            bubbleDiv.appendChild(p);
+            // Create a new <p> for each line in the section
+            section.forEach(line => {
+                const p = document.createElement('p');
+                p.textContent = line;
+                proseDiv.appendChild(p);
+            });
         }
-    }
 
+        // Append the proseDiv to the bubbleDiv
+        bubbleDiv.appendChild(proseDiv);
+    }
     function addStatusMessage(message) {
         const statusLog = document.getElementById('status-log');
         const timestamp = new Date().toLocaleTimeString(navigator.language, {

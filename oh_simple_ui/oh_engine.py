@@ -5,7 +5,7 @@ import uuid
 from asyncio import AbstractEventLoop
 from typing import Callable, Type
 
-import agenthub  # noqa F401 (we import this to get the agents registered)
+import openhands.agenthub  # noqa F401 (we import this to get the agents registered)
 from openhands.controller.agent import Agent
 from openhands.controller.agent_controller import AgentController
 from openhands.core.config import AppConfig, LLMConfig, load_app_config

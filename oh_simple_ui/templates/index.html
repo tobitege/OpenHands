@@ -8,8 +8,14 @@
 </head>
 <body class="bg-base-200">
     <div class="flex flex-col h-screen">
-        <div class="text-xl font-bold p-4">OpenHands: Code Less, Make More</div>
-        <div class="flex flex-1 h-full">
+        <!-- Header -->
+        <div class="text-xl font-bold p-4 fixed top-0 left-0 right-0 bg-base-200 z-10">
+            OpenHands: Code Less, Make More
+        </div>
+
+        <!-- Main Content Wrapper -->
+        <div class="flex flex-1 h-full pt-16">
+
             <!-- Sidebar -->
             <div class="w-64 bg-base-100 p-4 border-r border-base-300 h-full flex-shrink-0 flex flex-col">
                 <div>
@@ -41,7 +47,7 @@
                     </div>
                 </div>
                 <!-- Theming -->
-                <div class="mb-4 mt-auto">
+                <div class="mt-auto">
                     <label for="theme-selector" class="label">Theme</label>
                     <select id="theme-selector" class="select select-bordered w-full">
                         <option value="light">Light</option>
@@ -75,50 +81,52 @@
             </div>
 
             <!-- Main Content -->
-            <div class="flex-1 flex flex-col h-full" style="padding-left: 1rem; padding-right: 1rem; padding-top: 0;">
-                <!-- Top Area: Chat Container -->
-                <div class="flex-grow flex flex-col overflow-hidden" pb-4>
-                    <div class="label">
-                        <span class="label-text">Conversation</span>
+            <div class="flex-1 flex flex-col h-full min-h-0" style="padding-left: 1rem; padding-right: 1rem; padding-top: 0;">
+                <!-- Flex Column Wrapper -->
+                <div class="flex flex-col h-full min-h-0">
+                    <!-- Chat Container -->
+                    <div class="flex-grow min-h-0 overflow-y-auto">
+                        <div id="chat-container" class="bg-base-100 bordered rounded-lg shadow-md p-4 flex-grow overflow-y-auto flex flex-col space-y-2">
+                        </div>
                     </div>
-                    <div id="chat-container" class="bg-base-100 bordered rounded-lg shadow-md p-4 flex-grow overflow-y-auto flex flex-col space-y-2">
-                    </div>
-                </div>
 
-                <!-- Bottom Area: Remaining Components -->
-                <div class="sticky bottom-0 mb-4 mt-2 flex-shrink-0">
-                    <!-- Confirmation Dialog -->
-                    <div id="confirm-dialog" class="modal">
-                        <div class="modal-box">
-                            <h3 class="font-bold text-lg">Are you sure you want to restart the backend?</h3>
-                            <div class="modal-action">
-                                <button id="confirm-yes" class="btn btn-primary">Yes</button>
-                                <button id="confirm-no" class="btn">No</button>
+                    <!-- Chat Form and Status Message Area -->
+                    <div class="flex-shrink-0">
+                        <!-- Confirmation Dialog -->
+                        <div id="confirm-dialog" class="modal">
+                            <div class="modal-box">
+                                <h3 class="font-bold text-lg">Are you sure you want to restart the backend?</h3>
+                                <div class="modal-action">
+                                    <button id="confirm-yes" class="btn btn-primary">Yes</button>
+                                    <button id="confirm-no" class="btn">No</button>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Chat Form -->
-                    <form id="chat-form" class="w-full">
-                        <div class="flex items-center w-full space-x-2">
-                            <button type="button" id="image-upload-button" class="btn btn-square" aria-label="Upload image">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 32 32" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                            </button>
-                            <textarea id="chat-input" placeholder="Type your message here..." rows="1"
-                                class="textarea textarea-bordered textarea-sm font-mono flex-grow min-w-0"></textarea>
-                            <button type="submit" id="send-button" class="btn btn-square" aria-label="Send message">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h14m0 0v-8" />
-                                </svg>
-                            </button>
+
+                        <!-- Chat Form -->
+                        <form id="chat-form" class="w-full">
+                            <div class="flex items-center w-full space-x-2">
+                                <button type="button" id="image-upload-button" class="btn btn-square" aria-label="Upload image">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 32 32" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                </button>
+                                <textarea id="chat-input" placeholder="Type your message here..." rows="1"
+                                    class="textarea textarea-bordered textarea-sm font-mono flex-grow min-w-0"></textarea>
+                                <button type="submit" id="send-button" class="btn btn-square bordered" aria-label="Send message">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h14m0 0v-8" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </form>
+
+                        <!-- Status Message Area -->
+                        <div class="flex flex-col w-full mt-2">
+                            <label for="status-log" class="label">Status Log:</label>
+                            <textarea id="status-log" class="textarea textarea-bordered w-full font-mono" rows="4" readonly
+                                style="line-height: 1.1em;"></textarea>
                         </div>
-                    </form>
-                    <!-- Status Message Area -->
-                    <div class="flex flex-col w-full">
-                        <label for="status-log" class="label">Status Log:</label>
-                        <textarea id="status-log" class="textarea textarea-bordered w-full font-mono" rows="4" readonly
-                            style="line-height: 1.1em;"></textarea>
                     </div>
                 </div>
             </div>

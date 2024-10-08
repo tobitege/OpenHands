@@ -2,6 +2,8 @@ import asyncio
 
 from fastapi import WebSocket
 
+from openhands.core.logger import openhands_logger as logger
+
 from .oh_engine import OpenHandsEngine
 
 
@@ -21,7 +23,9 @@ class OHInterface:
         return False
 
     async def start_backend(self):
+        logger.debug('start_backend called')
         if not self.engine.is_running:
+            logger.debug('Starting backend')
             await self.engine.run(restart=False, llm_override=self.model)
         return self.engine.is_running
 

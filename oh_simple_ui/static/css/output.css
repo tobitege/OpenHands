@@ -2826,6 +2826,10 @@ html {
   border-bottom-left-radius: 0px;
 }
 
+.visible {
+  visibility: visible;
+}
+
 .sticky {
   position: sticky;
 }
@@ -2864,10 +2868,6 @@ html {
 
 .mt-auto {
   margin-top: auto;
-}
-
-.block {
-  display: block;
 }
 
 .inline-block {
@@ -2914,6 +2914,10 @@ html {
   width: 100%;
 }
 
+.min-w-0 {
+  min-width: 0px;
+}
+
 .flex-1 {
   flex: 1 1 0%;
 }
@@ -2932,6 +2936,12 @@ html {
 
 .items-center {
   align-items: center;
+}
+
+.space-x-2 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-x-reverse: 0;
+  margin-right: calc(0.5rem * var(--tw-space-x-reverse));
+  margin-left: calc(0.5rem * calc(1 - var(--tw-space-x-reverse)));
 }
 
 .space-y-2 > :not([hidden]) ~ :not([hidden]) {

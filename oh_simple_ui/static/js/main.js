@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatForm = document.getElementById('chat-form');
     const chatInput = document.getElementById('chat-input');
     const chatContainer = document.getElementById('chat-container');
+    const scrollableContainer = chatContainer.parentElement;
     const modelDropdown = document.getElementById('model-dropdown');
     const startBtn = document.getElementById('start-button');
     const restartBtn = document.getElementById('restart-button');
@@ -345,13 +346,15 @@ document.addEventListener('DOMContentLoaded', () => {
         messageDiv.appendChild(bubbleDiv);
 
         chatContainer.appendChild(messageDiv);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
+        // Scroll to bottom after a short delay to ensure content is rendered
+        setTimeout(() => {
+            scrollableContainer.scrollTop = scrollableContainer.scrollHeight;
+        }, 50);
     }
 
     function appendSection(bubbleDiv, section, isCode) {
-        // Create a div with the 'prose' class for markdown-like styling
         const proseDiv = document.createElement('div');
-        proseDiv.className = 'prose';
+        proseDiv.className = 'prose max-w-none';
 
         if (isCode) {
             const firstLine = document.createElement('p');
@@ -374,17 +377,53 @@ document.addEventListener('DOMContentLoaded', () => {
                 proseDiv.appendChild(mockupCode);
             }
         } else {
-            // Create a new <p> for each line in the section
-            section.forEach(line => {
-                const p = document.createElement('p');
-                p.textContent = line;
-                proseDiv.appendChild(p);
-            });
+            // Use marked to parse markdown content
+            const markdownContent = section.join('\n');
+            proseDiv.innerHTML = marked.parse(markdownContent);
         }
 
-        // Append the proseDiv to the bubbleDiv
         bubbleDiv.appendChild(proseDiv);
     }
+
+
+    // function appendSection(bubbleDiv, section, isCode) {
+    //     // Create a div with the 'prose' class for markdown-like styling
+    //     const proseDiv = document.createElement('div');
+    //     proseDiv.className = 'prose';
+
+    //     if (isCode) {
+    //         const firstLine = document.createElement('p');
+    //         firstLine.textContent = section[0];
+    //         proseDiv.appendChild(firstLine);
+
+    //         if (section.length > 1) {
+    //             const mockupCode = document.createElement('div');
+    //             mockupCode.className = 'mockup-code';
+
+    //             section.slice(1).forEach((line, index) => {
+    //                 const pre = document.createElement('pre');
+    //                 pre.setAttribute('data-prefix', index + 1);
+    //                 const code = document.createElement('code');
+    //                 code.textContent = line;
+    //                 pre.appendChild(code);
+    //                 mockupCode.appendChild(pre);
+    //             });
+
+    //             proseDiv.appendChild(mockupCode);
+    //         }
+    //     } else {
+    //         // Create a new <p> for each line in the section
+    //         section.forEach(line => {
+    //             const p = document.createElement('p');
+    //             p.textContent = line;
+    //             proseDiv.appendChild(p);
+    //         });
+    //     }
+
+    //     // Append the proseDiv to the bubbleDiv
+    //     bubbleDiv.appendChild(proseDiv);
+    // }
+
     function addStatusMessage(message) {
         const statusLog = document.getElementById('status-log');
         const timestamp = new Date().toLocaleTimeString(navigator.language, {

@@ -5,6 +5,7 @@ import re
 import tempfile
 import uuid
 import warnings
+from contextlib import asynccontextmanager
 
 import requests
 from pathspec import PathSpec
@@ -64,7 +65,15 @@ config = load_app_config()
 file_store = get_file_store(config.file_store, config.file_store_path)
 session_manager = SessionManager(config, file_store)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global session_manager
+    async with session_manager:
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=['http://localhost:3001', 'http://127.0.0.1:3001'],
@@ -772,11 +781,12 @@ async def security_api(request: Request):
 
 @app.get('/api/zip-directory')
 async def zip_current_workspace(request: Request):
-    logger.info('Zipping workspace')
-    runtime: Runtime = request.state.session.agent_session.runtime
-
     try:
-        zip_file_bytes = runtime.zip_files_in_sandbox()
+        logger.info('Zipping workspace')
+        runtime: Runtime = request.state.session.agent_session.runtime
+
+        path = runtime.config.workspace_mount_path_in_sandbox
+        zip_file_bytes = runtime.copy_from(path)
         zip_stream = io.BytesIO(zip_file_bytes)  # Wrap to behave like a file stream
         response = StreamingResponse(
             zip_stream,

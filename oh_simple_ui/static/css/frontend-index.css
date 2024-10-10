@@ -1,0 +1,88 @@
+:root {
+  --bg-dark: #0c0e10;
+  --bg-light: #292929;
+  --bg-input: #393939;
+  --bg-workspace: #1f2228;
+  --border: #3c3c4a;
+  --text-editor-base: #9099AC;
+  --text-editor-active:#C4CBDA;
+  --bg-editor-sidebar: #24272E;
+  --bg-editor-active: #31343D;
+  --border-editor-sidebar: #3C3C4A;
+  background-color: var(--neutral-900) !important;
+  --bg-neutral-muted: #afb8c133;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, "SF Pro", BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
+    "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
+    monospace;
+}
+
+.markdown-body code {
+  font-size: 0.85em;
+}
+
+.markdown-body code {
+  text-shadow: none;
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  white-space: break-spaces;
+  background-color: var(--bg-neutral-muted);
+  border-radius: 6px;
+}
+
+.markdown-body pre code {
+  font-size: 0.85em;
+  padding: 0;
+  background-color: inherit;
+  text-shadow: none;
+}
+.markdown-body {
+  white-space: pre-wrap; /* Handles line breaks */
+}
+
+.markdown-body th {
+  text-align: left;
+}
+
+.markdown-body th, .markdown-body td {
+  padding: 0.1rem 0.5rem;
+}
+
+.markdown-body ul, .markdown-body ol {
+  list-style-position: outside;
+  margin-left: 1.25rem;  /* Equivalent to ml-5 */
+  padding-left: 0.5rem;  /* Equivalent to pl-2 */
+  white-space: normal;
+  margin-top: 0.25rem;    /* Add some space before the list */
+  margin-bottom: 0.25rem; /* Add some space after the list */
+}
+
+.markdown-body ul {
+  list-style-type: disc;
+}
+
+.markdown-body ol {
+  list-style-type: decimal;
+}
+
+.markdown-body li {
+  line-height: 1.0;
+  margin-bottom: 0.1rem;
+}
+
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin-top: 0.1rem;
+  margin-bottom: 0.1rem;
+}

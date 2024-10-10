@@ -140,8 +140,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             if (data.success) {
                 addStatusMessage(`Model switched to ${selectedModel}`);
-            } else {
-                addStatusMessage(`Failed to switch model to ${selectedModel}`);
             }
         } catch (error) {
             console.error('Error switching model:', error);
@@ -310,10 +308,16 @@ document.addEventListener('DOMContentLoaded', () => {
         messageDiv.className = `chat ${sender === 'user' ? 'chat-end' : 'chat-start'} w-full`;
 
         const headerDiv = document.createElement('div');
-        headerDiv.className = 'chat-header text-xs';
+        headerDiv.className = 'chat-header text-xs flex items-center';
         headerDiv.innerHTML = `
-            ${sender === 'user' ? 'User' : 'Assistant'}
+            <span>${sender === 'user' ? 'User' : 'Assistant'}</span>
             <time class="text-xs opacity-50 ml-1">${new Date().toLocaleTimeString()}</time>
+            <button class="ml-4 copy-button" title="Copy to clipboard">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+            </button>
         `;
 
         const bubbleDiv = document.createElement('div');
@@ -321,75 +325,195 @@ document.addEventListener('DOMContentLoaded', () => {
             sender === 'user' ? 'chat-bubble-primary' : 'chat-bubble-secondary'
         }`;
 
-        const lines = textContent.split('\n');
-        let currentSection = [];
-        let inCodeBlock = false;
+        const markdownBody = document.createElement('div');
+        markdownBody.className = 'markdown-body';
+        markdownBody.innerHTML = formatContent(textContent);
 
-        for (const line of lines) {
-            if (line.includes('Bash ❯') || line.includes('❯ Command:') || line.includes('❯ Code:') || line.startsWith('IPython ❯')) {
-                if (currentSection.length > 0) {
-                    appendSection(bubbleDiv, currentSection, inCodeBlock);
-                    currentSection = [];
-                }
-                inCodeBlock = true;
-                currentSection.push(line);
-            } else {
-                currentSection.push(line);
-            }
-        }
-
-        if (currentSection.length > 0) {
-            appendSection(bubbleDiv, currentSection, inCodeBlock);
-        }
-
+        bubbleDiv.appendChild(markdownBody);
         messageDiv.appendChild(headerDiv);
         messageDiv.appendChild(bubbleDiv);
 
         chatContainer.appendChild(messageDiv);
-        // Scroll to bottom after a short delay to ensure content is rendered
+        Prism.highlightAll();
         setTimeout(() => {
             scrollableContainer.scrollTop = scrollableContainer.scrollHeight;
         }, 50);
+
+        // Add click event listener to the copy button
+        const copyButton = headerDiv.querySelector('.copy-button');
+        copyButton.addEventListener('click', () => {
+            const content = markdownBody.innerText;
+            navigator.clipboard.writeText(content).then(() => {
+                // Optionally, you can provide some visual feedback here
+                copyButton.title = 'Copied!';
+                setTimeout(() => {
+                    copyButton.title = 'Copy to clipboard';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
+        });
     }
 
-    function appendSection(bubbleDiv, section, isCode) {
-        const proseDiv = document.createElement('div');
-        proseDiv.className = 'prose max-w-none';
+    function formatContent(content) {
+        const lines = content.split('\n');
+        let formattedContent = '';
+        let inCodeBlock = false;
+        let codeLanguage = '';
 
-        if (isCode) {
-            const firstLine = document.createElement('p');
-            firstLine.textContent = section[0];
-            proseDiv.appendChild(firstLine);
-
-            if (section.length > 1) {
-                const mockupCode = document.createElement('div');
-                mockupCode.className = 'mockup-code';
-
-                section.slice(1).forEach((line, index) => {
-                    const pre = document.createElement('pre');
-                    pre.setAttribute('data-prefix', index + 1);
-                    const code = document.createElement('code');
-                    code.textContent = line;
-                    pre.appendChild(code);
-                    mockupCode.appendChild(pre);
-                });
-
-                proseDiv.appendChild(mockupCode);
+        for (const line of lines) {
+            if (line.startsWith('```')) {
+                if (inCodeBlock) {
+                    formattedContent += '</code></pre>';
+                    inCodeBlock = false;
+                } else {
+                    codeLanguage = line.slice(3).trim();
+                    formattedContent += `<pre><code class="language-${codeLanguage}">`;
+                    inCodeBlock = true;
+                }
+            } else if (line.startsWith('Bash ❯') || line.startsWith('❯ Command:')) {
+                formattedContent += `<pre><code class="language-bash">${escapeHtml(line)}\n`;
+            } else if (line.startsWith('IPython ❯') || line.startsWith('❯ Code:')) {
+                formattedContent += `<pre><code class="language-python">${escapeHtml(line)}\n`;
+            } else if (inCodeBlock) {
+                formattedContent += escapeHtml(line) + '\n';
+            } else {
+                formattedContent += parseMarkdown(line) + '\n';
             }
-        } else {
-            // Use marked to parse markdown content
-            const markdownContent = section.join('\n');
-            proseDiv.innerHTML = marked.parse(markdownContent);
         }
 
-        bubbleDiv.appendChild(proseDiv);
+        if (inCodeBlock) {
+            formattedContent += '</code></pre>';
+        }
+
+        return formattedContent;
     }
 
+    function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function parseMarkdown(text) {
+        let inList = false;
+        let listType = null;
+        let listContent = '';
+
+        // Process the text line by line
+        const lines = text.split('\n');
+        const processedLines = lines.map((line, index) => {
+            // Basic inline formatting
+            line = line
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/`(.*?)`/g, '<code>$1</code>')
+                .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2">$1</a>');
+
+            // Headers
+            if (line.startsWith('# ')) {
+                return `<h1>${line.slice(2)}</h1>`;
+            } else if (line.startsWith('## ')) {
+                return `<h2>${line.slice(3)}</h2>`;
+            } else if (line.startsWith('### ')) {
+                return `<h3>${line.slice(4)}</h3>`;
+            }
+
+            // Lists
+            if (line.match(/^\d+\. /) || line.startsWith('- ')) {
+                const newListType = line.match(/^\d+\. /) ? 'ol' : 'ul';
+                const listItemContent = line.replace(/^\d+\. |-\s*/, '');
+
+                if (!inList) {
+                    inList = true;
+                    listType = newListType;
+                    listContent = `<${listType}><li>${listItemContent}</li>`;
+                } else if (listType !== newListType) {
+                    const completedList = `${listContent}</${listType}>`;
+                    listType = newListType;
+                    listContent = `<${listType}><li>${listItemContent}</li>`;
+                    return completedList;
+                } else {
+                    listContent += `<li>${listItemContent}</li>`;
+                }
+
+                if (index === lines.length - 1) {
+                    return `${listContent}</${listType}>`;
+                }
+                return null;
+            } else if (inList) {
+                const completedList = `${listContent}</${listType}>`;
+                inList = false;
+                listContent = '';
+                return completedList + (line.trim() ? `\n${line}` : '');
+            }
+
+            return line;
+        });
+
+        // Filter out null values and join the lines
+        return processedLines.filter(line => line !== null).join('\n');
+    }
+
+    // function addMessage(sender, content) {
+    //     let textContent = Array.isArray(content) ? content[1] : content;
+    //     if (!textContent || textContent.length === 0) {
+    //         return;
+    //     }
+    //     const messageDiv = document.createElement('div');
+    //     messageDiv.className = `chat ${sender === 'user' ? 'chat-end' : 'chat-start'} w-full`;
+
+    //     const headerDiv = document.createElement('div');
+    //     headerDiv.className = 'chat-header text-xs';
+    //     headerDiv.innerHTML = `
+    //         ${sender === 'user' ? 'User' : 'Assistant'}
+    //         <time class="text-xs opacity-50 ml-1">${new Date().toLocaleTimeString()}</time>
+    //     `;
+
+    //     const bubbleDiv = document.createElement('div');
+    //     bubbleDiv.className = `chat-bubble ${
+    //         sender === 'user' ? 'chat-bubble-primary' : 'chat-bubble-secondary'
+    //     }`;
+
+    //     const lines = textContent.split('\n');
+    //     let currentSection = [];
+    //     let inCodeBlock = false;
+
+    //     for (const line of lines) {
+    //         if (line.includes('Bash ❯') || line.includes('❯ Command:') || line.includes('❯ Code:') || line.startsWith('IPython ❯')) {
+    //             if (currentSection.length > 0) {
+    //                 appendSection(bubbleDiv, currentSection, inCodeBlock);
+    //                 currentSection = [];
+    //             }
+    //             inCodeBlock = true;
+    //             currentSection.push(line);
+    //         } else {
+    //             currentSection.push(line);
+    //         }
+    //     }
+
+    //     if (currentSection.length > 0) {
+    //         appendSection(bubbleDiv, currentSection, inCodeBlock);
+    //     }
+
+    //     messageDiv.appendChild(headerDiv);
+    //     messageDiv.appendChild(bubbleDiv);
+
+    //     chatContainer.appendChild(messageDiv);
+    //     // Scroll to bottom after a short delay to ensure content is rendered
+    //     setTimeout(() => {
+    //         scrollableContainer.scrollTop = scrollableContainer.scrollHeight;
+    //     }, 50);
+    // }
 
     // function appendSection(bubbleDiv, section, isCode) {
     //     // Create a div with the 'prose' class for markdown-like styling
     //     const proseDiv = document.createElement('div');
-    //     proseDiv.className = 'prose';
+    //     // proseDiv.className = 'prose';
+    //     proseDiv.className = 'markdown-body';
 
     //     if (isCode) {
     //         const firstLine = document.createElement('p');
@@ -398,7 +522,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     //         if (section.length > 1) {
     //             const mockupCode = document.createElement('div');
-    //             mockupCode.className = 'mockup-code';
+    //             // mockupCode.className = 'mockup-code';
+    //             mockupCode.className = 'code';
 
     //             section.slice(1).forEach((line, index) => {
     //                 const pre = document.createElement('pre');

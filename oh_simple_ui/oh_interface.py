@@ -42,12 +42,15 @@ class OHInterface:
         except asyncio.TimeoutError:
             return 'Request timed out. Please try again.'
 
+    def get_chat_history(self):
+        return self.chatbot_state
+
     def add_chat_message(self, role, content):
         self.chatbot_state.append((role, content))
         asyncio.create_task(self.broadcast_message(role, content))
 
     def clear_chat_state(self):
-        self.chatbot_state = [('assistant', 'Chat cleared. How can I help you?')]
+        self.chatbot_state = []
         self.engine.clear_chat_state()
 
     def switch_model(self, model_name):
@@ -66,9 +69,6 @@ class OHInterface:
 
     def cancel_operation(self):
         return self.engine.cancel_operation()
-
-    def get_chat_history(self):
-        return self.chatbot_state
 
     async def broadcast_message(self, role, content):
         message = {'role': role, 'content': content}

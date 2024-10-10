@@ -1,6 +1,5 @@
 import asyncio
 import re
-import traceback
 import uuid
 from asyncio import AbstractEventLoop
 from typing import Callable, Type
@@ -72,6 +71,7 @@ class OpenHandsEngine:
         self.llm_name: str | None = None
         self.model: str | None = None
         self.config = config or load_app_config()
+        self._is_initializing: bool = False
 
     def switch_running_model(self, new_llm_name: str) -> bool:
         """Switch the currently running model to a new one.
@@ -141,65 +141,85 @@ class OpenHandsEngine:
             - If `restart` is True, the existing engine instance will be closed first.
             - If `llm_override` is provided, the engine will switch to the new LLM.
         """
+        if self._is_initializing:
+            logger.debug(
+                'Engine initialization already in progress, ignoring `run` call.'
+            )
+            return
+
         if self.is_running:
             if restart:
                 await self.close()
             elif not llm_override:
+                self._is_initializing = False
                 logger.debug('Engine already running, ignoring `run` call.')
                 return
 
-        self.is_running = True
+        self._is_initializing = True
+        self.is_running = False
+        try:
+            agent_cls: Type[Agent] = Agent.get_cls(self.config.default_agent)
+            agent_config = self.config.get_agent_config(self.config.default_agent)
+            llm_config = self.config.get_llm_config_from_agent(
+                self.config.default_agent
+            )
 
-        agent_cls: Type[Agent] = Agent.get_cls(self.config.default_agent)
-        agent_config = self.config.get_agent_config(self.config.default_agent)
-        llm_config = self.config.get_llm_config_from_agent(self.config.default_agent)
+            if llm_override:
+                model_llm_config = self.get_llm_config(llm_override)
+                if model_llm_config:
+                    self.llm_name = llm_override
+                    self.model = model_llm_config.model
+                    llm_config = model_llm_config
+                    logger.debug(f'>>> Backend using model `{llm_override}`')
+                else:
+                    logger.warning(
+                        f'>>> Model `{llm_override}` not found, using default model'
+                    )
 
-        if llm_override:
-            model_llm_config = self.get_llm_config(llm_override)
-            if model_llm_config:
-                self.llm_name = llm_override
-                self.model = model_llm_config.model
-                llm_config = model_llm_config
-                logger.debug(f'>>> Backend using model `{llm_override}`')
-            else:
-                logger.warning(
-                    f'>>> Model `{llm_override}` not found, using default model'
-                )
+            self._agent = agent_cls(
+                llm=LLM(config=llm_config),
+                config=agent_config,
+            )
 
-        self._agent = agent_cls(
-            llm=LLM(config=llm_config),
-            config=agent_config,
-        )
+            file_store = get_file_store(
+                self.config.file_store, self.config.file_store_path
+            )
+            self._event_stream = EventStream(self.sid, file_store)
 
-        file_store = get_file_store(self.config.file_store, self.config.file_store_path)
-        self._event_stream = EventStream(self.sid, file_store)
+            runtime_cls = get_runtime_cls(self.config.runtime)
+            self.runtime: Runtime = runtime_cls(
+                config=self.config,
+                event_stream=self._event_stream,
+                sid=self.sid,
+                plugins=agent_cls.sandbox_plugins,
+                # TODO: add status message callback
+                # status_message_callback = self.add_status_message,
+            )
 
-        runtime_cls = get_runtime_cls(self.config.runtime)
-        self.runtime: Runtime = runtime_cls(
-            config=self.config,
-            event_stream=self._event_stream,
-            sid=self.sid,
-            plugins=agent_cls.sandbox_plugins,
-            # TODO: add status message callback
-            # status_message_callback = self.add_status_message,
-        )
+            self._controller = AgentController(
+                agent=self._agent,
+                max_iterations=self.config.max_iterations,
+                max_budget_per_task=self.config.max_budget_per_task,
+                agent_to_llm_config=self.config.get_agent_to_llm_config_map(),
+                event_stream=self._event_stream,
+                sid=self.sid,
+                confirmation_mode=False,
+                headless_mode=False,
+            )
 
-        self._controller = AgentController(
-            agent=self._agent,
-            max_iterations=self.config.max_iterations,
-            max_budget_per_task=self.config.max_budget_per_task,
-            agent_to_llm_config=self.config.get_agent_to_llm_config_map(),
-            event_stream=self._event_stream,
-            sid=self.sid,
-            confirmation_mode=False,
-            headless_mode=False,
-        )
+            self._event_stream.subscribe(EventStreamSubscriber.MAIN, self.on_event)
 
-        self._event_stream.subscribe(EventStreamSubscriber.MAIN, self.on_event)
+            logger.info('OpenHands started!')
 
-        logger.info('OpenHands started!')
+            self._agent_task = self._loop.create_task(self._run_agent_loop())
 
-        self._agent_task = self._loop.create_task(self._run_agent_loop())
+            self.is_running = True
+
+        except Exception as e:
+            logger.error(f'Error starting OpenHands: {e}')
+            self.is_running = False
+        finally:
+            self._is_initializing = False
 
     async def _run_agent_loop(self):
         while self.is_running:
@@ -210,7 +230,6 @@ class OpenHandsEngine:
                 break
             except Exception as e:
                 logger.error(f'Error in agent loop: {e}')
-                traceback.print_exc()
                 break
             await asyncio.sleep(0.1)  # Short sleep to prevent CPU hogging
 
@@ -259,7 +278,10 @@ class OpenHandsEngine:
         elif isinstance(event, CmdOutputObservation) and hasattr(event, 'content'):
             msg = 'Bash ❯\n' + self.display_command_output(event.content)
 
-        elif isinstance(event, IPythonRunCellObservation) and hasattr(event, 'code'):
+        elif isinstance(event, IPythonRunCellObservation) and event.content:
+            msg = 'IPython ❯\n' + self.display_command_output(event.content)
+
+        elif isinstance(event, IPythonRunCellObservation) and event.code:
             msg = 'IPython ❯\n' + self.display_command_output(event.code)
 
         elif isinstance(event, AgentDelegateAction):

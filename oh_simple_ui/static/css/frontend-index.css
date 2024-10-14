@@ -86,3 +86,19 @@ code {
   margin-top: 0.1rem;
   margin-bottom: 0.1rem;
 }
+
+.copy-all-button {
+    opacity: 0.6;
+    transition: opacity 0.3s;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.copy-all-button:hover {
+    opacity: 1;
+}
+
+#chat-container {
+    position: relative;
+}

@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sendButton = document.getElementById('send-button');
     const clearButton = document.getElementById('clear-button');
     const confirmDialog = document.getElementById('confirm-dialog');
+    const copyAllButton = document.getElementById('copy-all-button');
     const imageUploadButton = document.getElementById('image-upload-button');
 
     const websocket = new WebSocket(`ws://${window.location.host}/ws`);
@@ -75,9 +76,30 @@ document.addEventListener('DOMContentLoaded', () => {
         setInterval(periodicCheck, checkInterval);
     };
 
-    // Initialize status display and start status checks
-    checkAndUpdateBackendStatus();
-    startPeriodicCheck();
+    copyAllButton.addEventListener('click', () => {
+        const messages = chatContainer.querySelectorAll('.chat-bubble .markdown-body');
+        let allContent = '';
+        messages.forEach((message, index) => {
+            if (index > 0) {
+                allContent += '\n\n--------------------------------------------------\n\n';
+            }
+            allContent += message.innerText;
+        });
+
+        navigator.clipboard.writeText(allContent).then(() => {
+            copyAllButton.title = 'Copied!';
+            setTimeout(() => {
+                copyAllButton.title = 'Copy all messages';
+            }, 2000);
+        }).catch(err => {
+            console.error('Failed to copy all messages: ', err);
+        });
+    });
+
+    function updateCopyAllButtonState() {
+        const messages = chatContainer.querySelectorAll('.chat-bubble');
+        copyAllButton.disabled = messages.length === 0;
+    }
 
     // Fetch and populate model dropdown
     fetch('/models')
@@ -104,6 +126,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         })
         .catch(error => console.error('Error fetching models:', error));
+
+    // Initialize status display and start status checks
+    checkAndUpdateBackendStatus();
+    startPeriodicCheck();
 
     websocket.onmessage = (event) => {
         const messageData = JSON.parse(event.data);
@@ -153,6 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             if (data.success) {
                 chatContainer.innerHTML = '';
+                updateCopyAllButtonState();
                 addStatusMessage('Chat history cleared.');
             } else {
                 addStatusMessage('Failed to clear chat history on server.');
@@ -339,6 +366,8 @@ document.addEventListener('DOMContentLoaded', () => {
             scrollableContainer.scrollTop = scrollableContainer.scrollHeight;
         }, 50);
 
+        updateCopyAllButtonState();
+
         // Add click event listener to the copy button
         const copyButton = headerDiv.querySelector('.copy-button');
         copyButton.addEventListener('click', () => {
@@ -457,97 +486,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Filter out null values and join the lines
         return processedLines.filter(line => line !== null).join('\n');
     }
-
-    // function addMessage(sender, content) {
-    //     let textContent = Array.isArray(content) ? content[1] : content;
-    //     if (!textContent || textContent.length === 0) {
-    //         return;
-    //     }
-    //     const messageDiv = document.createElement('div');
-    //     messageDiv.className = `chat ${sender === 'user' ? 'chat-end' : 'chat-start'} w-full`;
-
-    //     const headerDiv = document.createElement('div');
-    //     headerDiv.className = 'chat-header text-xs';
-    //     headerDiv.innerHTML = `
-    //         ${sender === 'user' ? 'User' : 'Assistant'}
-    //         <time class="text-xs opacity-50 ml-1">${new Date().toLocaleTimeString()}</time>
-    //     `;
-
-    //     const bubbleDiv = document.createElement('div');
-    //     bubbleDiv.className = `chat-bubble ${
-    //         sender === 'user' ? 'chat-bubble-primary' : 'chat-bubble-secondary'
-    //     }`;
-
-    //     const lines = textContent.split('\n');
-    //     let currentSection = [];
-    //     let inCodeBlock = false;
-
-    //     for (const line of lines) {
-    //         if (line.includes('Bash ❯') || line.includes('❯ Command:') || line.includes('❯ Code:') || line.startsWith('IPython ❯')) {
-    //             if (currentSection.length > 0) {
-    //                 appendSection(bubbleDiv, currentSection, inCodeBlock);
-    //                 currentSection = [];
-    //             }
-    //             inCodeBlock = true;
-    //             currentSection.push(line);
-    //         } else {
-    //             currentSection.push(line);
-    //         }
-    //     }
-
-    //     if (currentSection.length > 0) {
-    //         appendSection(bubbleDiv, currentSection, inCodeBlock);
-    //     }
-
-    //     messageDiv.appendChild(headerDiv);
-    //     messageDiv.appendChild(bubbleDiv);
-
-    //     chatContainer.appendChild(messageDiv);
-    //     // Scroll to bottom after a short delay to ensure content is rendered
-    //     setTimeout(() => {
-    //         scrollableContainer.scrollTop = scrollableContainer.scrollHeight;
-    //     }, 50);
-    // }
-
-    // function appendSection(bubbleDiv, section, isCode) {
-    //     // Create a div with the 'prose' class for markdown-like styling
-    //     const proseDiv = document.createElement('div');
-    //     // proseDiv.className = 'prose';
-    //     proseDiv.className = 'markdown-body';
-
-    //     if (isCode) {
-    //         const firstLine = document.createElement('p');
-    //         firstLine.textContent = section[0];
-    //         proseDiv.appendChild(firstLine);
-
-    //         if (section.length > 1) {
-    //             const mockupCode = document.createElement('div');
-    //             // mockupCode.className = 'mockup-code';
-    //             mockupCode.className = 'code';
-
-    //             section.slice(1).forEach((line, index) => {
-    //                 const pre = document.createElement('pre');
-    //                 pre.setAttribute('data-prefix', index + 1);
-    //                 const code = document.createElement('code');
-    //                 code.textContent = line;
-    //                 pre.appendChild(code);
-    //                 mockupCode.appendChild(pre);
-    //             });
-
-    //             proseDiv.appendChild(mockupCode);
-    //         }
-    //     } else {
-    //         // Create a new <p> for each line in the section
-    //         section.forEach(line => {
-    //             const p = document.createElement('p');
-    //             p.textContent = line;
-    //             proseDiv.appendChild(p);
-    //         });
-    //     }
-
-    //     // Append the proseDiv to the bubbleDiv
-    //     bubbleDiv.appendChild(proseDiv);
-    // }
 
     function addStatusMessage(message) {
         const statusLog = document.getElementById('status-log');

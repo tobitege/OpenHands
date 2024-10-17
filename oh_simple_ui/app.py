@@ -4,12 +4,13 @@ import os
 import signal
 
 import uvicorn
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.websockets import WebSocketDisconnect
 
 from openhands.core.logger import openhands_logger as logger
+from openhands.events.action import MessageAction
 
 from .oh_interface import OHInterface
 
@@ -47,7 +48,7 @@ async def read_root(request: Request):
 
 @app.on_event('startup')
 async def startup_event():
-    # await oh_interface.start_backend()
+    # TODO for later
     pass
 
 
@@ -74,14 +75,45 @@ async def restart_backend():
 @app.post('/chat/')
 async def chat(request: Request):
     data = await request.json()
-    message = data.get('message')
+    try:
+        message = MessageAction(content=data.get('content', ''))
+        message.timestamp = data.get('timestamp', '')
+        message.images_urls = data.get('images_urls', [])
+        logger.debug(
+            f"Received message: content='{message.content}', images_urls={len(message.images_urls)}"
+        )
+    except ValueError as e:
+        logger.error(f'Error creating Message object: {e}')
+        raise HTTPException(status_code=400, detail=str(e))
+
     response = await oh_interface.handle_user_input(message)
+    # logger.debug(f'Response from handle_user_input: {response}')
+
     return {'response': response}
 
 
 @app.get('/chat_history/')
 async def get_chat_history():
+    # TODO this is not implemented yet in the UI
     return {'history': oh_interface.get_chat_history()}
+
+
+@app.post('/delete_image/')
+async def delete_image(request: Request):
+    data = await request.json()
+    message_id = data.get('message_id')
+    image_index = data.get('image_index')
+
+    if not message_id or image_index is None:
+        raise HTTPException(status_code=400, detail='Missing message_id or image_index')
+
+    # Handle the image deletion in the OHInterface
+    success = await oh_interface.delete_image(message_id, image_index)
+
+    if success:
+        return {'success': True}
+    else:
+        raise HTTPException(status_code=500, detail='Failed to delete image')
 
 
 @app.post('/switch_model/')
@@ -114,6 +146,16 @@ async def get_models():
 async def get_available_models():
     models, default_model = oh_interface.get_available_models()
     return {'models': models, 'default_model': default_model}
+
+
+@app.get('/initial_chat_history')
+async def get_initial_chat_history():
+    history = oh_interface.get_chat_history()
+    return {
+        'history': [
+            {'role': role, 'message': message.dict()} for role, message in history
+        ]
+    }
 
 
 @app.on_event('shutdown')

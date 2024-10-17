@@ -21,5 +21,5 @@ class MessageAction(Action):
         ret += f'CONTENT: {self.content}'
         if self.images_urls:
             for url in self.images_urls:
-                ret += f'\nIMAGE_URL: {url}'
+                ret += f'\nIMAGE_URL: {url[:20]}{"..." if len(url) > 20 else ""}'
         return ret

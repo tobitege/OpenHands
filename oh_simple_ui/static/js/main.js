@@ -21,8 +21,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const websocket = new WebSocket(`ws://${window.location.host}/ws`);
 
+    const MAX_IMAGES = 4;
+    const ALLOWED_IMAGE_TYPES = ['image/gif', 'image/jpeg', 'image/png'];
+
     let backendRunning = null;
     let backendLoading = false;
+    let uploadedImages = [];
 
     function updateBackendStatus() {
         if (backendRunning) {
@@ -55,16 +59,16 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(data => {
                 const newStatus = data.is_running;
                 console.debug('checkAndUpdateBackendStatus', newStatus);
-                if (newStatus !== backendRunning) {
-                    backendRunning = newStatus;
-                    updateBackendStatus();
-                }
+                // if (newStatus !== backendRunning) {
+                backendRunning = newStatus;
+                updateBackendStatus();
+                // }
             })
             .catch(error => console.error('Error:', error));
     }
 
     const startPeriodicCheck = () => {
-        const checkInterval = 20000; // 20 seconds
+        const checkInterval = 30 * 1000; // 30 seconds
 
         const periodicCheck = () => {
             const loadingIndicator = document.querySelector(".loading-indicator");
@@ -130,6 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize status display and start status checks
     checkAndUpdateBackendStatus();
     startPeriodicCheck();
+    // fetchInitialChatHistory();
 
     websocket.onmessage = (event) => {
         const messageData = JSON.parse(event.data);
@@ -181,6 +186,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 chatContainer.innerHTML = '';
                 updateCopyAllButtonState();
                 addStatusMessage('Chat history cleared.');
+                uploadedImages = [];
+                updateImagePreview();
             } else {
                 addStatusMessage('Failed to clear chat history on server.');
             }
@@ -191,30 +198,45 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     async function handleChatSubmit() {
-        const message = chatInput.value.trim();
-        if (message && backendRunning) {
-            addMessage('user', message);
-            chatInput.value = '';
-            setLoadingIndicator(true);
-            try {
-                const response = await fetch('/chat/', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ message }),
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                addMessage('assistant', data.response);
-            } catch (error) {
-                console.error('Error:', error);
-                addMessage('assistant', 'Sorry, an error occurred. Please try again.');
-            } finally {
-                setLoadingIndicator(false);
+        const messageContent = chatInput.value.trim();
+        if (!messageContent || !backendRunning) {
+            return;
+        }
+        const message = {
+            content: messageContent,
+            images_urls: uploadedImages,
+            timestamp: new Date().toISOString()
+        };
+        addMessage('user', message);
+        chatInput.value = '';
+        setLoadingIndicator(true);
+        try {
+            const response = await fetch('/chat/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(message),
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
+            const data = await response.json();
+            if (data.response) {
+                addMessage('assistant', data.response);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            addMessage('assistant', {
+                content: 'Sorry, an error occurred. Please try again.',
+                images_urls: [],
+                timestamp: new Date().toISOString()
+            });
+        } finally {
+            setLoadingIndicator(false);
+            uploadedImages = [];
+            updateImagePreview();
+            chatInput.focus();
         }
     }
 
@@ -242,21 +264,79 @@ document.addEventListener('DOMContentLoaded', () => {
     imageUploadButton.addEventListener('click', () => {
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
-        fileInput.accept = 'image/*';
+        fileInput.accept = 'image/gif,image/jpeg,image/png';
+        fileInput.multiple = true;
         fileInput.style.display = 'none';
 
-        fileInput.addEventListener('change', () => {
-            const file = fileInput.files[0];
-            if (file) {
-                // Handle the image file upload here
-                console.log('Selected file:', file);
-                // You can display a preview or send the file to the server
-            }
-        });
+        fileInput.addEventListener('change', async () => {
+            const files = Array.from(fileInput.files);
+            for (const file of files) {
+                if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+                    addStatusMessage(`File type ${file.type} not allowed. Skipping.`);
+                    continue;
+                }
 
-        // Trigger the file input click
+                if (uploadedImages.length >= MAX_IMAGES) {
+                    addStatusMessage(`Maximum of ${MAX_IMAGES} images reached. Some images were not added.`);
+                    break;
+                }
+
+                try {
+                    // const base64Image = await readFileAsBase64(file);
+                    const base64Image = await readFileAsDataURL(file);
+                    uploadedImages.push(base64Image);
+                } catch (error) {
+                    console.error('Error reading image:', error);
+                    addStatusMessage('Error reading image');
+                }
+            }
+            updateImagePreview();
+        });
         fileInput.click();
     });
+
+    function readFileAsDataURL(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function updateImagePreview() {
+        const previewContainer = document.getElementById('image-preview-container');
+        previewContainer.innerHTML = '';
+
+        uploadedImages.forEach((base64Image, index) => {
+            const imgElement = document.createElement('img');
+            imgElement.src = base64Image.startsWith('data:')? base64Image : `data:image/png;base64,${base64Image}`;
+            imgElement.alt = `Uploaded image ${index + 1}`;
+            imgElement.className = 'preview-image';
+
+            const removeButton = document.createElement('button');
+            removeButton.textContent = '×';
+            removeButton.className = 'remove-image-button';
+            removeButton.onclick = () => removeUploadedImage(index);
+
+            const imageContainer = document.createElement('div');
+            imageContainer.className = 'image-preview-item';
+            imageContainer.appendChild(imgElement);
+            imageContainer.appendChild(removeButton);
+
+            previewContainer.appendChild(imageContainer);
+        });
+
+        // Update image upload button state
+        imageUploadButton.disabled = uploadedImages.length >= MAX_IMAGES;
+        imageUploadButton.title = uploadedImages.length >= MAX_IMAGES ?
+            `Maximum of ${MAX_IMAGES} images reached` : 'Upload image';
+    }
+
+    function removeUploadedImage(index) {
+        uploadedImages.splice(index, 1);
+        updateImagePreview();
+    }
 
     themeSelector.addEventListener('change', () => {
         const selectedTheme = themeSelector.value.toLowerCase();
@@ -287,6 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             await checkAndUpdateBackendStatus();
             setLoadingIndicator(false);
+            startBtn.disabled = false;
         }
     });
 
@@ -306,6 +387,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             if (data.success) {
                 addStatusMessage('Backend restarted successfully');
+                uploadedImages = [];
+                updateImagePreview();
             } else {
                 addStatusMessage('Failed to restart backend');
             }
@@ -326,11 +409,24 @@ document.addEventListener('DOMContentLoaded', () => {
         addStatusMessage('Restart cancelled.');
     });
 
-    function addMessage(sender, content) {
-        let textContent = Array.isArray(content) ? content[1] : content;
-        if (!textContent || textContent.length === 0) {
+    function addMessage(sender, message) {
+        // Ensure message is an object
+        if (typeof message === 'string') {
+            message = { content: message };
+        }
+
+        // Ensure message has required properties
+        message = {
+            content: message.content || '',
+            images_urls: message.images_urls || [],
+            timestamp: message.timestamp || new Date().toISOString()
+        };
+
+        if (!message.content && message.images_urls.length === 0) {
+            console.error('Invalid message:', message);
             return;
         }
+
         const messageDiv = document.createElement('div');
         messageDiv.className = `chat ${sender === 'user' ? 'chat-end' : 'chat-start'} w-full`;
 
@@ -338,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
         headerDiv.className = 'chat-header text-xs flex items-center';
         headerDiv.innerHTML = `
             <span>${sender === 'user' ? 'User' : 'Assistant'}</span>
-            <time class="text-xs opacity-50 ml-1">${new Date().toLocaleTimeString()}</time>
+            <time class="text-xs opacity-50 ml-1">${new Date(message.timestamp).toLocaleTimeString()}</time>
             <button class="ml-4 copy-button" title="Copy to clipboard">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -354,9 +450,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const markdownBody = document.createElement('div');
         markdownBody.className = 'markdown-body';
-        markdownBody.innerHTML = formatContent(textContent);
+        markdownBody.innerHTML = formatContent(message.content);
 
         bubbleDiv.appendChild(markdownBody);
+
+        if (message.images_urls && message.images_urls.length > 0) {
+            const imageContainer = document.createElement('div');
+            imageContainer.className = 'flex flex-wrap gap-2 mt-2';
+            message.images_urls.forEach((base64Image, index) => {
+                const imgWrapper = document.createElement('div');
+                imgWrapper.className = 'relative';
+
+                const img = document.createElement('img');
+                img.src = base64Image.startsWith('data:')? base64Image : `data:image/png;base64,${base64Image}`;
+                img.alt = `upload preview ${index}`;
+                img.className = 'object-cover rounded bg-white';
+                img.style = 'width: 200px;';
+
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center';
+                deleteButton.innerHTML = '×';
+                deleteButton.onclick = (e) => {
+                    e.stopPropagation();
+                    deleteImage(message.id, index, base64Image);
+                };
+
+                imgWrapper.appendChild(img);
+                imgWrapper.appendChild(deleteButton);
+                imageContainer.appendChild(imgWrapper);
+            });
+            bubbleDiv.appendChild(imageContainer);
+        }
+
         messageDiv.appendChild(headerDiv);
         messageDiv.appendChild(bubbleDiv);
 
@@ -382,6 +507,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('Failed to copy text: ', err);
             });
         });
+    }
+
+    async function deleteImage(messageId, index) {
+        console.log(`Deleting image at index ${index} for message ${messageId}`);
+
+        try {
+            const response = await fetch('/delete_image/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message_id: messageId, image_index: index }),
+            });
+            const result = await response.json();
+            if (result.success) {
+                // Remove the image from the UI
+                const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+                if (messageElement) {
+                    const imageElements = messageElement.querySelectorAll('.flex.flex-wrap.gap-2.mt-2 > div');
+                    if (imageElements[index]) {
+                        imageElements[index].remove();
+                    }
+                }
+            } else {
+                console.error('Failed to delete image');
+                addStatusMessage('Failed to delete image');
+            }
+        } catch (error) {
+            console.error('Error deleting image:', error);
+            addStatusMessage(`Error deleting image: ${error.message}`);
+        }
     }
 
     function formatContent(content) {
@@ -527,4 +683,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return null;
     }
+
+    async function fetchInitialChatHistory() {
+        // TODO: not working yet!
+        try {
+            const response = await fetch('/initial_chat_history');
+            const data = await response.json();
+            if (data.history && data.history.length > 0) {
+                data.history.forEach(item => {
+                    appendMessage(item.role, item.message.content);
+                });
+            }
+        } catch (error) {
+            console.error('Error fetching initial chat history:', error);
+        }
+    }
+
+    function appendMessage(role, content) {
+        const chatBox = document.getElementById('chat-box');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = role === 'assistant' ? 'assistant-message' : 'user-message';
+        messageDiv.textContent = content;
+        chatBox.appendChild(messageDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
 });

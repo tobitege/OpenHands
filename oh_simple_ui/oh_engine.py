@@ -1,5 +1,6 @@
 import asyncio
 import re
+import traceback
 import uuid
 from asyncio import AbstractEventLoop
 from typing import Callable, Type
@@ -230,6 +231,7 @@ class OpenHandsEngine:
                 break
             except Exception as e:
                 logger.error(f'Error in agent loop: {e}')
+                traceback.print_exc()
                 break
             await asyncio.sleep(0.1)  # Short sleep to prevent CPU hogging
 
@@ -308,52 +310,76 @@ class OpenHandsEngine:
         return msg if msg is not None else ''
 
     async def on_event(self, event: Event):
-        logger.debug(f'>>> Event: {event}')
         if not self._event_stream or isinstance(event, NullObservation):
             return
+        logger.debug(f'>>> Event: {event}')
 
         output = await self.display_event(event)
         if output:
             logger.debug(f'>>> Output: {output}')
-            chat_message = (
-                'assistant' if event.source != EventSource.USER else 'user',
-                output,
+            chat_message = MessageAction(content=output)
+            chat_message.images_urls = (
+                event.images_urls if hasattr(event, 'images_urls') else []
             )
+            # chat_message.timestamp = event.timestamp if hasattr(event, 'timestamp') else ''
             if self.chat_delegate:
                 self.chat_delegate('assistant', chat_message)
-                logger.debug('>>> Message sent to UI')
-            else:
-                logger.error('>>> No message delegate assigned!')
+                # logger.debug('>>> Message sent to UI')
+            # else:
+            #     logger.error('>>> No message delegate assigned!')
 
         if isinstance(event, AgentStateChangedObservation):
             if event.agent_state == AgentState.ERROR:
                 if self.chat_delegate:
                     self.chat_delegate(
-                        ('assistant', 'An error occurred. Please try again.')
+                        'assistant',
+                        MessageAction(
+                            content='An error occurred. Please try again.',
+                            images_urls=[],
+                        ),
                     )
             elif event.agent_state in [
                 AgentState.AWAITING_USER_INPUT,
                 AgentState.FINISHED,
                 AgentState.ERROR,
             ]:
-                await self._check_for_next_task('')
+                await self._check_for_next_task(
+                    MessageAction(content='', images_urls=[])
+                )
 
-    async def _check_for_next_task(self, message: str):
-        if not message or not self._event_stream:
+    async def _check_for_next_task(self, message: MessageAction):
+        if not isinstance(message, MessageAction):
+            logger.error(f'Invalid message type: {type(message)}')
             return
-        if message == 'exit':
+
+        # logger.debug(
+        #     f"Checking for next task: content='{message.content}'"
+        # )
+
+        if not message.content and not message.images_urls:
+            # logger.debug('No content or image URLs in message, skipping')
+            return
+
+        if message.content == 'exit':
+            # logger.debug("Received 'exit' command, changing agent state to STOPPED")
             self._event_stream.add_event(
                 ChangeAgentStateAction(AgentState.STOPPED), EventSource.USER
             )
             return
-        action = MessageAction(content=message)
-        self._event_stream.add_event(action, EventSource.USER)
-        logger.debug(f'Added MessageAction to event stream:\n{action}')
 
-    async def handle_user_input(self, message: str):
+        action = MessageAction(
+            content=message.content,
+            images_urls=message.images_urls if message.images_urls else None,
+        )
+
+        self._event_stream.add_event(action, EventSource.USER)
+
+    async def handle_user_input(self, message: MessageAction):
         if not self._event_stream or not self._controller:
             return
+
         await self._check_for_next_task(message)
+
         if self._controller.state.agent_state != AgentState.RUNNING:
             await self._controller.set_agent_state_to(AgentState.RUNNING)
 

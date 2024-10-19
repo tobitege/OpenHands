@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "openhands-ai"
-version = "0.9.8"
+version = "0.10.0"
 description = "OpenHands: Code Less, Make More"
 authors = ["OpenHands"]
 license = "MIT"
@@ -53,6 +53,7 @@ pylatexenc = "*"
 tornado = "*"
 gradio = "*"
 python-dotenv = "*"
+whatthepatch = "^1.0.6"
 protobuf = "^4.21.6,<5.0.0" # chromadb currently fails on 5.0+
 opentelemetry-api = "1.25.0"
 opentelemetry-exporter-otlp-proto-grpc = "1.25.0"
@@ -63,7 +64,7 @@ llama-index = "*"
 llama-index-vector-stores-chroma = "*"
 chromadb = "*"
 llama-index-embeddings-huggingface = "*"
-torch = "2.2.2"
+torch = "2.5.0"
 llama-index-embeddings-azure-openai = "*"
 llama-index-embeddings-ollama = "*"
 

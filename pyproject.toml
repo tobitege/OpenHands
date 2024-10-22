@@ -53,6 +53,7 @@ pylatexenc = "*"
 tornado = "*"
 gradio = "*"
 python-dotenv = "*"
+pylcs = "^0.1.1"
 whatthepatch = "^1.0.6"
 protobuf = "^4.21.6,<5.0.0" # chromadb currently fails on 5.0+
 opentelemetry-api = "1.25.0"

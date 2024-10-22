@@ -18,6 +18,7 @@ from openhands.events.action import (
     BrowseInteractiveAction,
     BrowseURLAction,
     CmdRunAction,
+    FileEditAction,
     FileReadAction,
     FileWriteAction,
     IPythonRunCellAction,
@@ -450,6 +451,9 @@ class EventStreamRuntime(Runtime):
             self.docker_client.close()
 
     def run_action(self, action: Action) -> Observation:
+        if isinstance(action, FileEditAction):
+            return self.edit(action)
+
         # set timeout to default if not set
         if action.timeout is None:
             action.timeout = self.config.sandbox.timeout

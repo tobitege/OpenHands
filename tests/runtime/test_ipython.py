@@ -28,8 +28,8 @@ from openhands.events.observation import (
 # ============================================================================================================================
 
 
-def test_simple_cmd_ipython_and_fileop(temp_dir, box_class, run_as_openhands):
-    runtime = _load_runtime(temp_dir, box_class, run_as_openhands)
+def test_simple_cmd_ipython_and_fileop(temp_dir, runtime_cls, run_as_openhands):
+    runtime = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
 
     sandbox_dir = _get_sandbox_folder(runtime)
 
@@ -102,8 +102,8 @@ def test_simple_cmd_ipython_and_fileop(temp_dir, box_class, run_as_openhands):
     TEST_IN_CI != 'True',
     reason='This test is not working in WSL (file ownership)',
 )
-def test_ipython_multi_user(temp_dir, box_class, run_as_openhands):
-    runtime = _load_runtime(temp_dir, box_class, run_as_openhands)
+def test_ipython_multi_user(temp_dir, runtime_cls, run_as_openhands):
+    runtime = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
 
     # Test run ipython
     # get username
@@ -174,8 +174,8 @@ def test_ipython_multi_user(temp_dir, box_class, run_as_openhands):
     _close_test_runtime(runtime)
 
 
-def test_ipython_simple(temp_dir, box_class):
-    runtime = _load_runtime(temp_dir, box_class)
+def test_ipython_simple(temp_dir, runtime_cls):
+    runtime = _load_runtime(temp_dir, runtime_cls)
     sandbox_dir = _get_sandbox_folder(runtime)
 
     # Test run ipython
@@ -198,9 +198,9 @@ def test_ipython_simple(temp_dir, box_class):
     _close_test_runtime(runtime)
 
 
-def test_ipython_package_install(temp_dir, box_class, run_as_openhands):
+def test_ipython_package_install(temp_dir, runtime_cls, run_as_openhands):
     """Make sure that cd in bash also update the current working directory in ipython."""
-    runtime = _load_runtime(temp_dir, box_class, run_as_openhands)
+    runtime = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
     sandbox_dir = _get_sandbox_folder(runtime)
 
     # It should error out since pymsgbox is not installed
@@ -230,5 +230,87 @@ def test_ipython_package_install(temp_dir, box_class, run_as_openhands):
         f'[Jupyter current working directory: {sandbox_dir}]\n'
         '[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.12/bin/python]'
     )
+
+    _close_test_runtime(runtime)
+
+
+def test_ipython_file_editor_permissions_as_openhands(temp_dir, runtime_cls):
+    """Test file editor permission behavior when running as different users."""
+    runtime = _load_runtime(temp_dir, runtime_cls, run_as_openhands=True)
+    sandbox_dir = _get_sandbox_folder(runtime)
+
+    # Create a file owned by root with restricted permissions
+    action = CmdRunAction(
+        command='sudo touch /root/test.txt && sudo chmod 600 /root/test.txt'
+    )
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    assert obs.exit_code == 0
+
+    # Try to view the file as openhands user - should fail with permission denied
+    test_code = "print(file_editor(command='view', path='/root/test.txt'))"
+    action = IPythonRunCellAction(code=test_code)
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    assert 'Permission denied' in obs.content
+
+    # Try to edit the file as openhands user - should fail with permission denied
+    test_code = "print(file_editor(command='str_replace', path='/root/test.txt', old_str='', new_str='test'))"
+    action = IPythonRunCellAction(code=test_code)
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    assert 'Permission denied' in obs.content
+
+    # Try to create a file in root directory - should fail with permission denied
+    test_code = (
+        "print(file_editor(command='create', path='/root/new.txt', file_text='test'))"
+    )
+    action = IPythonRunCellAction(code=test_code)
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    assert 'Permission denied' in obs.content
+
+    # Try to use file editor in openhands sandbox directory - should work
+    test_code = f"""
+# Create file
+print(file_editor(command='create', path='{sandbox_dir}/test.txt', file_text='Line 1\\nLine 2\\nLine 3'))
+
+# View file
+print(file_editor(command='view', path='{sandbox_dir}/test.txt'))
+
+# Edit file
+print(file_editor(command='str_replace', path='{sandbox_dir}/test.txt', old_str='Line 2', new_str='New Line 2'))
+
+# Undo edit
+print(file_editor(command='undo_edit', path='{sandbox_dir}/test.txt'))
+"""
+    action = IPythonRunCellAction(code=test_code)
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    assert 'File created successfully' in obs.content
+    assert 'Line 1' in obs.content
+    assert 'Line 2' in obs.content
+    assert 'Line 3' in obs.content
+    assert 'New Line 2' in obs.content
+    assert 'Last edit to' in obs.content
+    assert 'undone successfully' in obs.content
+
+    # Clean up
+    action = CmdRunAction(command=f'rm -f {sandbox_dir}/test.txt')
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    assert obs.exit_code == 0
+
+    action = CmdRunAction(command='sudo rm -f /root/test.txt')
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    assert obs.exit_code == 0
 
     _close_test_runtime(runtime)

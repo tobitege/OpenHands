@@ -49,9 +49,14 @@ function SocketProvider({ children }: SocketProviderProps) {
     const fallback = getValidFallbackHost();
     const baseUrl = import.meta.env.VITE_BACKEND_BASE_URL || fallback;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(
-      `${protocol}//${baseUrl}/ws${options?.token ? `?token=${options.token}` : ""}`,
-    );
+    const sessionToken = options?.token || "NO_JWT"; // not allowed to be empty or duplicated
+    const ghToken = localStorage.getItem("ghToken") || "NO_GITHUB";
+
+    const ws = new WebSocket(`${protocol}//${baseUrl}/ws`, [
+      "openhands",
+      sessionToken,
+      ghToken,
+    ]);
 
     ws.addEventListener("open", (event) => {
       setIsConnected(true);
@@ -95,6 +100,7 @@ function SocketProvider({ children }: SocketProviderProps) {
         EventLogger.error("WebSocket is not connected.");
         return;
       }
+      setEvents((prevEvents) => [...prevEvents, JSON.parse(data.toString())]);
       wsRef.current.send(data);
     },
     [],

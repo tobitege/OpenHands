@@ -93,6 +93,10 @@ class Runtime(FileEditRuntimeMixin):
     def close(self) -> None:
         pass
 
+    def log(self, level: str, message: str) -> None:
+        message = f'[runtime {self.sid}] {message}'
+        getattr(logger, level)(message)
+
     # ====================================================================
 
     def add_env_vars(self, env_vars: dict[str, str]) -> None:
@@ -104,7 +108,7 @@ class Runtime(FileEditRuntimeMixin):
                 code += f'os.environ["{key}"] = {json.dumps(value)}\n'
             code += '\n'
             obs = self.run_ipython(IPythonRunCellAction(code))
-            logger.info(f'Added env vars to IPython: code={code}, obs={obs}')
+            self.log('debug', f'Added env vars to IPython: code={code}, obs={obs}')
 
         # Add env vars to the Bash shell
         cmd = ''
@@ -127,8 +131,13 @@ class Runtime(FileEditRuntimeMixin):
             if event.timeout is None:
                 event.timeout = self.config.sandbox.timeout
             assert event.timeout is not None
-            observation = await call_sync_from_async(self.run_action, event)
+            observation: Observation = await call_sync_from_async(
+                self.run_action, event
+            )
             observation._cause = event.id  # type: ignore[attr-defined]
+            observation.tool_call_metadata = event.tool_call_metadata
+
+            # this might be unnecessary, since source should be set by the event stream when we're here
             source = event.source if event.source else EventSource.AGENT
             await self.event_stream.async_add_event(observation, source)  # type: ignore[arg-type]
 
@@ -140,8 +149,9 @@ class Runtime(FileEditRuntimeMixin):
         if not action.runnable:
             return NullObservation('')
         if (
-            hasattr(action, 'is_confirmed')
-            and action.is_confirmed == ActionConfirmationStatus.AWAITING_CONFIRMATION
+            hasattr(action, 'confirmation_state')
+            and action.confirmation_state
+            == ActionConfirmationStatus.AWAITING_CONFIRMATION
         ):
             return NullObservation('')
         action_type = action.action  # type: ignore[attr-defined]
@@ -152,8 +162,8 @@ class Runtime(FileEditRuntimeMixin):
                 f'Action {action_type} is not supported in the current runtime.'
             )
         if (
-            hasattr(action, 'is_confirmed')
-            and action.is_confirmed == ActionConfirmationStatus.REJECTED
+            getattr(action, 'confirmation_state', None)
+            == ActionConfirmationStatus.REJECTED
         ):
             return UserRejectObservation(
                 'Action has been rejected by the user! Waiting for further user input.'
@@ -170,6 +180,10 @@ class Runtime(FileEditRuntimeMixin):
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.close()
+
+    @abstractmethod
+    async def connect(self) -> None:
+        pass
 
     # ====================================================================
     # Action execution

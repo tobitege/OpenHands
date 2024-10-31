@@ -12,7 +12,6 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import WebSocket from "ws";
 import toast from "react-hot-toast";
-import ChatInterface from "#/components/chat/ChatInterface";
 import { getSettings } from "#/services/settings";
 import Security from "../components/modals/security/Security";
 import { Controls } from "#/components/controls";
@@ -51,6 +50,7 @@ import { FilesProvider } from "#/context/files";
 import { clearSession } from "#/utils/clear-session";
 import { userIsAuthenticated } from "#/utils/user-is-authenticated";
 import { ErrorObservation } from "#/types/core/observations";
+import { ChatInterface } from "#/components/chat-interface";
 
 interface ServerError {
   error: boolean | string;
@@ -73,10 +73,15 @@ const isAgentStateChange = (
 export const clientLoader = async () => {
   const ghToken = localStorage.getItem("ghToken");
 
-  const isAuthed = await userIsAuthenticated(ghToken);
-  if (!isAuthed) {
+  try {
+    const isAuthed = await userIsAuthenticated(ghToken);
+    if (!isAuthed) {
+      clearSession();
+      return redirect("/");
+    }
+  } catch (error) {
     clearSession();
-    return redirect("/waitlist");
+    return redirect("/");
   }
 
   const q = store.getState().initalQuery.initialQuery;
@@ -132,6 +137,11 @@ function App() {
     useLoaderData<typeof clientLoader>();
   const fetcher = useFetcher();
   const data = useRouteLoaderData<typeof rootClientLoader>("routes/_oh");
+
+  const secrets = React.useMemo(
+    () => [ghToken, token].filter((secret) => secret !== null),
+    [ghToken, token],
+  );
 
   // To avoid re-rendering the component when the user object changes, we memoize the user ID.
   // We use this to ensure the github token is valid before exporting it to the terminal.
@@ -230,13 +240,23 @@ function App() {
 
         // handle new session
         if (!token) {
+          let additionalInfo = "";
           if (ghToken && repo) {
             send(getCloneRepoCommand(ghToken, repo));
+            additionalInfo = `Repository ${repo} has been cloned to /workspace. Please check the /workspace for files.`;
             dispatch(clearSelectedRepository()); // reset selected repository; maybe better to move this to '/'?
+          }
+          // if there's an uploaded project zip, add it to the chat
+          else if (importedProjectZip) {
+            additionalInfo = `Files have been uploaded. Please check the /workspace for files.`;
           }
 
           if (q) {
-            sendInitialQuery(q, files);
+            if (additionalInfo) {
+              sendInitialQuery(`${q}\n\n[${additionalInfo}]`, files);
+            } else {
+              sendInitialQuery(q, files);
+            }
             dispatch(clearFiles()); // reset selected files
           }
         }
@@ -295,11 +315,11 @@ function App() {
   return (
     <div className="flex flex-col h-full gap-3">
       <div className="flex h-full overflow-auto gap-3">
-        <Container className="w-1/4 max-h-full">
+        <Container className="w-[375px] max-h-full">
           <ChatInterface />
         </Container>
 
-        <div className="flex flex-col w-3/4 gap-3">
+        <div className="flex flex-col grow gap-3">
           <Container
             className="h-2/3"
             labels={[
@@ -321,7 +341,7 @@ function App() {
            * that it loads only in the client-side. */}
           <Container className="h-1/3 overflow-scroll" label="Terminal">
             <React.Suspense fallback={<div className="h-full" />}>
-              <Terminal />
+              <Terminal secrets={secrets} />
             </React.Suspense>
           </Container>
         </div>

@@ -61,7 +61,7 @@ def display_event(event: Event):
         if hasattr(event, 'thought'):
             display_message(event.thought)
     if isinstance(event, MessageAction):
-        if event.source != EventSource.USER:
+        if event.source == EventSource.AGENT:
             display_message(event.content)
     if isinstance(event, CmdRunAction):
         display_command(event.command)
@@ -114,6 +114,7 @@ async def main():
         sid=sid,
         plugins=agent_cls.sandbox_plugins,
     )
+    await runtime.connect()
 
     controller = AgentController(
         agent=agent,
@@ -130,7 +131,7 @@ async def main():
         next_message = input('How can I help? >> ')
         if next_message == 'exit':
             event_stream.add_event(
-                ChangeAgentStateAction(AgentState.STOPPED), EventSource.USER
+                ChangeAgentStateAction(AgentState.STOPPED), EventSource.ENVIRONMENT
             )
             return
         action = MessageAction(content=next_message)
